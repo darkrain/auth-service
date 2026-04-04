@@ -21,6 +21,7 @@
   "RmqQueueMailName": "sendmail",
   "RmqExchangeName": "mail",
   "RmqExchangeKind": "direct",
+  "SessionTTLDays": 30,
   "RateLimit": {
     "IP": {
       "LoginMaxAttempts": 5,

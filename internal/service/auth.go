@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/darkrain/auth-service/internal/config"
@@ -19,6 +22,114 @@ var ErrValidation = errors.New("validation error")
 
 // ErrAlreadyExists is returned when email/phone is already taken.
 var ErrAlreadyExists = errors.New("already exists")
+
+// ErrNotFound is returned when the user is not found.
+var ErrNotFound = errors.New("not found")
+
+// ErrUnauthorized is returned when credentials are invalid.
+var ErrUnauthorized = errors.New("unauthorized")
+
+// ErrForbidden is returned when access is denied due to account status.
+var ErrForbidden = errors.New("forbidden")
+
+// LoginResult holds the result of a successful login.
+type LoginResult struct {
+	Token      string
+	ExpireDate time.Time
+}
+
+// Login validates credentials, creates a session, and returns a token.
+func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, login, password, ip string) (*LoginResult, error) {
+	login = strings.TrimSpace(login)
+	password = strings.TrimSpace(password)
+
+	if login == "" {
+		return nil, fmt.Errorf("%w: login is required", ErrValidation)
+	}
+	if password == "" {
+		return nil, fmt.Errorf("%w: password is required", ErrValidation)
+	}
+
+	isEmail := strings.Contains(login, "@")
+
+	var userID int64
+	var storedHash string
+	var verifyStatus string
+
+	if pool != nil {
+		var query string
+		if isEmail {
+			query = `SELECT id, password, verify_status FROM users WHERE email = $1 LIMIT 1`
+		} else {
+			query = `SELECT id, password, verify_status FROM users WHERE phone = $1 LIMIT 1`
+		}
+		err := pool.QueryRow(ctx, query, login).Scan(&userID, &storedHash, &verifyStatus)
+		if err != nil {
+			return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+		}
+	}
+
+	// Check verify_status
+	switch verifyStatus {
+	case "verified":
+		// OK
+	case "registered":
+		return nil, fmt.Errorf("%w: Account not verified. Please verify your email or phone.", ErrForbidden)
+	case "banned":
+		return nil, fmt.Errorf("%w: Account is banned.", ErrForbidden)
+	case "deleted":
+		return nil, fmt.Errorf("%w: Account not found.", ErrForbidden)
+	default:
+		return nil, fmt.Errorf("%w: Account access denied.", ErrForbidden)
+	}
+
+	// Verify password
+	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(cfg.PasswordSalt+password)); err != nil {
+		return nil, fmt.Errorf("%w: invalid credentials", ErrUnauthorized)
+	}
+
+	// Generate token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, fmt.Errorf("token generation: %w", err)
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	// Calculate expiry
+	ttlDays := cfg.SessionTTLDays
+	if ttlDays <= 0 {
+		ttlDays = 30
+	}
+	expireDate := time.Now().Add(time.Duration(ttlDays) * 24 * time.Hour)
+
+	// Insert session
+	if pool != nil {
+		_, err := pool.Exec(ctx,
+			`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked) VALUES ($1, $2, $3, $4, $5, false)`,
+			userID, token, expireDate, "password", ip,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("db: insert session: %w", err)
+		}
+	}
+
+	return &LoginResult{
+		Token:      token,
+		ExpireDate: expireDate,
+	}, nil
+}
+
+// Logout marks a session as blocked.
+func Logout(ctx context.Context, pool *pgxpool.Pool, token string) error {
+	if pool == nil {
+		return nil
+	}
+	_, err := pool.Exec(ctx, `UPDATE sessions SET blocked=true WHERE token=$1`, token)
+	if err != nil {
+		return fmt.Errorf("db: update session: %w", err)
+	}
+	return nil
+}
 
 // RegisterRequest holds the registration input.
 type RegisterRequest struct {
