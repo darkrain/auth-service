@@ -1,0 +1,48 @@
+{
+  "Host": "",
+  "Port": "8080",
+  "PasswordSalt": "changeme_random_secret",
+  "PasswordMinLength": 8,
+  "PasswordRequireDigits": true,
+  "PasswordRequireSpecial": false,
+  "SystemUserEmail": "system@auth.internal",
+  "SystemUserPassword": "changeme_system_password",
+  "PostgreSqlHost": "localhost",
+  "PostgreSqlPort": "5432",
+  "PostgreSqlUserName": "iamfree",
+  "PostgreSqlPassword": "",
+  "PostgreSqlDatabase": "iamfree",
+  "RedisDatabaseNetwork": "tcp",
+  "RedisDatabaseHost": "localhost",
+  "RedisDatabasePort": "6380",
+  "RmqHost": "localhost:5672",
+  "RmqUser": "iamfree",
+  "RmqPassword": "",
+  "RmqQueueMailName": "sendmail",
+  "RmqExchangeName": "mail",
+  "RmqExchangeKind": "direct",
+  "RateLimit": {
+    "IP": {
+      "LoginMaxAttempts": 5,
+      "LoginWindowSec": 900,
+      "RegisterMaxAttempts": 3,
+      "RegisterWindowSec": 3600
+    },
+    "Device": {
+      "LoginMaxAttempts": 10,
+      "LoginWindowSec": 3600,
+      "SendCodeMaxAttempts": 3,
+      "SendCodeWindowSec": 3600,
+      "RegisterMaxAttempts": 3,
+      "RegisterWindowSec": 86400
+    },
+    "Account": {
+      "MaxFailedLogins": 5,
+      "LockDurationSec": 900
+    },
+    "Code": {
+      "MaxAttempts": 5,
+      "TTLSec": 300
+    }
+  }
+}
