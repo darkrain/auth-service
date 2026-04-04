@@ -10,7 +10,9 @@ import (
 	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/db"
+	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -33,13 +35,13 @@ func main() {
 	}
 
 	// PostgreSQL
-	var dbPool interface{ Close() }
-	pgPool, err := db.Connect(cfg)
+	var pgPool *pgxpool.Pool
+	rawPool, err := db.Connect(cfg)
 	if err != nil {
 		log.Printf("WARNING: PostgreSQL not available: %v", err)
 	} else {
-		dbPool = pgPool
-		defer dbPool.Close()
+		pgPool = rawPool
+		defer pgPool.Close()
 		log.Println("PostgreSQL connected")
 
 		// Migrations
@@ -84,6 +86,8 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
+
+	r.POST("/auth/register", handler.Register(pgPool, rmqConn, cfg))
 
 	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
 	log.Printf("starting server on %s", addr)
