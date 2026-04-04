@@ -1,0 +1,17 @@
+[Unit]
+Description=auth-service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/etc/auth-service
+ExecStart=/usr/bin/auth-service --config config.json
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=auth-service
+
+[Install]
+WantedBy=multi-user.target
