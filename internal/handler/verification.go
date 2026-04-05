@@ -13,11 +13,35 @@ import (
 )
 
 type sendCodeRequest struct {
-	Recipient string `json:"recipient"`
-	DeviceUID string `json:"device_uid"`
+	Recipient string `json:"recipient" example:"user@example.com"`
+	DeviceUID string `json:"device_uid" example:"device-uuid-1234"`
+}
+
+type verifyCodeRequest struct {
+	Recipient string `json:"recipient" example:"user@example.com"`
+	Code      string `json:"code" example:"123456"`
+	DeviceUID string `json:"device_uid" example:"device-uuid-1234"`
+}
+
+type verifyLogin2FARequest struct {
+	Login     string `json:"login" example:"user@example.com"`
+	Code      string `json:"code" example:"123456"`
+	DeviceUID string `json:"device_uid" example:"device-uuid-1234"`
 }
 
 // SendCode handles POST /auth/send-code
+//
+//	@Summary		Send verification code
+//	@Description	Sends a verification code to the specified email or phone number.
+//	@Tags			verification
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		sendCodeRequest	true	"Recipient and device UID"
+//	@Success		200		{object}	messageResponse
+//	@Failure		400		{object}	errorResponse
+//	@Failure		429		{object}	errorResponse
+//	@Failure		500		{object}	errorResponse
+//	@Router			/auth/send-code [post]
 func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req sendCodeRequest
@@ -51,13 +75,20 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 	}
 }
 
-type verifyCodeRequest struct {
-	Recipient string `json:"recipient"`
-	Code      string `json:"code"`
-	DeviceUID string `json:"device_uid"`
-}
-
 // VerifyEmail handles POST /auth/verify/email
+//
+//	@Summary		Verify email address
+//	@Description	Verifies a user's email address using a code sent to them.
+//	@Tags			verification
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		verifyCodeRequest	true	"Email, code and device UID"
+//	@Success		200		{object}	messageResponse
+//	@Failure		400		{object}	errorResponse
+//	@Failure		404		{object}	errorResponse
+//	@Failure		429		{object}	errorResponse
+//	@Failure		500		{object}	errorResponse
+//	@Router			/auth/verify/email [post]
 func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req verifyCodeRequest
@@ -77,6 +108,19 @@ func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 }
 
 // VerifyPhone handles POST /auth/verify/phone
+//
+//	@Summary		Verify phone number
+//	@Description	Verifies a user's phone number using a code sent to them.
+//	@Tags			verification
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		verifyCodeRequest	true	"Phone, code and device UID"
+//	@Success		200		{object}	messageResponse
+//	@Failure		400		{object}	errorResponse
+//	@Failure		404		{object}	errorResponse
+//	@Failure		429		{object}	errorResponse
+//	@Failure		500		{object}	errorResponse
+//	@Router			/auth/verify/phone [post]
 func VerifyPhone(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req verifyCodeRequest
@@ -95,13 +139,20 @@ func VerifyPhone(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
-type verifyLogin2FARequest struct {
-	Login     string `json:"login"`
-	Code      string `json:"code"`
-	DeviceUID string `json:"device_uid"`
-}
-
 // VerifyLogin2FA handles POST /auth/login/verify-2fa
+//
+//	@Summary		Verify 2FA code during login
+//	@Description	Completes the login process by verifying a 2FA code. Returns a JWT token on success.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		verifyLogin2FARequest	true	"Login, 2FA code and device UID"
+//	@Success		200		{object}	loginResponse
+//	@Failure		400		{object}	errorResponse
+//	@Failure		404		{object}	errorResponse
+//	@Failure		429		{object}	errorResponse
+//	@Failure		500		{object}	errorResponse
+//	@Router			/auth/login/verify-2fa [post]
 func VerifyLogin2FA(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req verifyLogin2FARequest

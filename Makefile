@@ -9,7 +9,7 @@ BUILD    := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 LDFLAGS  := -ldflags "-X main.Version=$(VERSION) -X main.Build=$(BUILD) -X main.ProjectName=$(BIN_FILE)"
 
-.PHONY: get vendor build test run install uninstall clean deb
+.PHONY: get vendor build test run install uninstall clean deb swagger
 
 get:
 	go mod download
@@ -45,6 +45,9 @@ uninstall:
 
 clean:
 	rm -rf $(BIN_DIR)
+
+swagger:
+	swag init -g cmd/main.go -o docs/
 
 deb: build
 	$(eval DEB_NAME := $(BIN_FILE)_$(VERSION)_amd64)

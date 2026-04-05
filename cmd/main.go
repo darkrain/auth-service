@@ -1,3 +1,22 @@
+// Package main is the entry point for the Auth Service.
+//
+//	@title			Auth Service API
+//	@version		1.0
+//	@description	Authentication and authorization microservice with JWT sessions, 2FA, and API key management.
+//	@termsOfService	http://swagger.io/terms/
+//
+//	@contact.name	darkrain
+//	@contact.url	https://github.com/darkrain/auth-service
+//
+//	@license.name	MIT
+//
+//	@host		localhost:8080
+//	@BasePath	/
+//
+//	@securityDefinitions.apikey	BearerAuth
+//	@in							header
+//	@name						Authorization
+//	@description				Type "Bearer" followed by a space and the JWT token.
 package main
 
 import (
@@ -7,6 +26,7 @@ import (
 	"log"
 	"net/http"
 
+	_ "github.com/darkrain/auth-service/docs"
 	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
@@ -16,6 +36,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 var (
@@ -90,6 +112,9 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
+
+	// Swagger UI
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	r.POST("/auth/register",
 		middleware.RateLimit(cacheClient, rmqConn, "/auth/register",

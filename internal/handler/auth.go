@@ -14,12 +14,51 @@ import (
 )
 
 type loginRequest struct {
-	Login     string `json:"login"`
-	Password  string `json:"password"`
-	DeviceUID string `json:"device_uid"`
+	Login     string `json:"login" example:"user@example.com"`
+	Password  string `json:"password" example:"Secret123!"`
+	DeviceUID string `json:"device_uid" example:"device-uuid-1234"`
+}
+
+type loginResponse struct {
+	Token      string `json:"token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`
+	ExpireDate string `json:"expire_date" example:"2025-01-01T00:00:00Z"`
+}
+
+type login2FAResponse struct {
+	Message     string `json:"message" example:"Code sent to your email/phone. Please verify."`
+	Requires2FA bool   `json:"requires_2fa" example:"true"`
+}
+
+type registerRequest struct {
+	Login    string `json:"login" example:"user@example.com"`
+	Password string `json:"password" example:"Secret123!"`
+}
+
+type messageResponse struct {
+	Message string `json:"message" example:"Operation successful"`
+}
+
+type errorResponse struct {
+	Error string `json:"error" example:"error description"`
 }
 
 // Login handles POST /auth/login
+//
+//	@Summary		Login with email/phone and password
+//	@Description	Authenticates a user by login (email or phone) and password. Returns a JWT token on success, or 202 if 2FA is required.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		loginRequest	true	"Login credentials"
+//	@Success		200		{object}	loginResponse
+//	@Success		202		{object}	login2FAResponse
+//	@Failure		400		{object}	errorResponse
+//	@Failure		401		{object}	errorResponse
+//	@Failure		403		{object}	errorResponse
+//	@Failure		404		{object}	errorResponse
+//	@Failure		429		{object}	errorResponse
+//	@Failure		500		{object}	errorResponse
+//	@Router			/auth/login [post]
 func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req loginRequest
@@ -69,6 +108,17 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheC
 }
 
 // Logout handles POST /auth/logout
+//
+//	@Summary		Logout and invalidate token
+//	@Description	Invalidates the current session token. Requires a Bearer token in the Authorization header.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	messageResponse
+//	@Failure		401	{object}	errorResponse
+//	@Failure		500	{object}	errorResponse
+//	@Router			/auth/logout [post]
 func Logout(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -92,7 +142,24 @@ func Logout(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 	}
 }
 
+type meResponse struct {
+	ID           int    `json:"id" example:"1"`
+	Email        string `json:"email" example:"user@example.com"`
+	Phone        string `json:"phone" example:"+79001234567"`
+	Role         string `json:"role" example:"user"`
+	VerifyStatus string `json:"verify_status" example:"verified"`
+}
+
 // Me handles GET /auth/me — returns current user data from session context.
+//
+//	@Summary		Get current user info
+//	@Description	Returns information about the currently authenticated user based on the session token.
+//	@Tags			auth
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	meResponse
+//	@Failure		401	{object}	errorResponse
+//	@Router			/auth/me [get]
 func Me() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
@@ -111,12 +178,18 @@ func Me() gin.HandlerFunc {
 	}
 }
 
-type registerRequest struct {
-	Login    string `json:"login"`
-	Password string `json:"password"`
-}
-
 // Register handles POST /auth/register
+//
+//	@Summary		Register a new user
+//	@Description	Creates a new user account. Login can be an email address or a phone number. A verification code will be sent to the provided contact.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		registerRequest	true	"Registration data"
+//	@Success		201		{object}	messageResponse
+//	@Failure		400		{object}	errorResponse
+//	@Failure		500		{object}	errorResponse
+//	@Router			/auth/register [post]
 func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req registerRequest

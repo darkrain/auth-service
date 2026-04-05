@@ -11,7 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type apiKeyResponse struct {
+	ID        int    `json:"id" example:"1"`
+	Token     string `json:"token" example:"ak_..."`
+	CreatedAt string `json:"created_at" example:"2025-01-01T00:00:00Z"`
+}
+
 // CreateAPIKey handles POST /auth/api-keys
+//
+//	@Summary		Create a new API key
+//	@Description	Creates a new API key for the authenticated user. Requires admin or system role.
+//	@Tags			api-keys
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		201	{object}	apiKeyResponse
+//	@Failure		401	{object}	errorResponse
+//	@Failure		500	{object}	errorResponse
+//	@Router			/auth/api-keys [post]
 func CreateAPIKey(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
@@ -40,6 +56,16 @@ func CreateAPIKey(pool *pgxpool.Pool) gin.HandlerFunc {
 }
 
 // ListAPIKeys handles GET /auth/api-keys
+//
+//	@Summary		List API keys
+//	@Description	Returns all API keys belonging to the authenticated user. Requires admin or system role.
+//	@Tags			api-keys
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{array}		apiKeyResponse
+//	@Failure		401	{object}	errorResponse
+//	@Failure		500	{object}	errorResponse
+//	@Router			/auth/api-keys [get]
 func ListAPIKeys(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
@@ -64,6 +90,19 @@ func ListAPIKeys(pool *pgxpool.Pool) gin.HandlerFunc {
 }
 
 // RevokeAPIKey handles DELETE /auth/api-keys/:id
+//
+//	@Summary		Revoke an API key
+//	@Description	Revokes and deletes an API key by ID. Requires admin or system role.
+//	@Tags			api-keys
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		int	true	"API key ID"
+//	@Success		200	{object}	messageResponse
+//	@Failure		400	{object}	errorResponse
+//	@Failure		401	{object}	errorResponse
+//	@Failure		404	{object}	errorResponse
+//	@Failure		500	{object}	errorResponse
+//	@Router			/auth/api-keys/{id} [delete]
 func RevokeAPIKey(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
