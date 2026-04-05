@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -91,11 +92,15 @@ func ListAPIKeys(ctx context.Context, pool *pgxpool.Pool, userID int) ([]APIKeyI
 	return keys, nil
 }
 
-// RevokeAPIKey sets blocked=true for the given API key owned by userID.
-func RevokeAPIKey(ctx context.Context, pool *pgxpool.Pool, keyID, userID int) error {
+// RevokeAPIKey sets blocked=true for the given API key owned by userID and invalidates Redis cache.
+func RevokeAPIKey(ctx context.Context, pool *pgxpool.Pool, cacheClient *cache.Client, keyID, userID int) error {
 	if pool == nil {
 		return fmt.Errorf("database unavailable")
 	}
+
+	// Fetch token before blocking so we can invalidate cache
+	var token string
+	_ = pool.QueryRow(ctx, `SELECT token FROM sessions WHERE id=$1 AND user_id=$2`, keyID, userID).Scan(&token)
 
 	tag, err := pool.Exec(ctx, `
 		UPDATE sessions SET blocked = true
@@ -107,6 +112,10 @@ func RevokeAPIKey(ctx context.Context, pool *pgxpool.Pool, keyID, userID int) er
 
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("%w: api key not found", ErrNotFound)
+	}
+
+	if cacheClient != nil && token != "" {
+		_ = cacheClient.DeleteSession(ctx, token)
 	}
 
 	return nil

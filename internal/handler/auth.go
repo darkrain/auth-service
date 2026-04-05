@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
@@ -66,7 +67,7 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin.Ha
 }
 
 // Logout handles POST /auth/logout
-func Logout(pool *pgxpool.Pool) gin.HandlerFunc {
+func Logout(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if !strings.HasPrefix(authHeader, "Bearer ") {
@@ -80,12 +81,31 @@ func Logout(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		if err := service.Logout(c.Request.Context(), pool, token); err != nil {
+		if err := service.Logout(c.Request.Context(), pool, cacheClient, token); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	}
+}
+
+// Me handles GET /auth/me — returns current user data from session context.
+func Me() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, _ := c.Get("user_id")
+		email, _ := c.Get("email")
+		phone, _ := c.Get("phone")
+		role, _ := c.Get("role")
+		verifyStatus, _ := c.Get("verify_status")
+
+		c.JSON(http.StatusOK, gin.H{
+			"id":            userID,
+			"email":         email,
+			"phone":         phone,
+			"role":          role,
+			"verify_status": verifyStatus,
+		})
 	}
 }
 
