@@ -88,6 +88,8 @@ func main() {
 	})
 
 	r.POST("/auth/register", handler.Register(pgPool, rmqConn, cfg))
+	r.POST("/auth/login", handler.Login(pgPool, cfg))
+	r.POST("/auth/logout", handler.Logout(pgPool))
 
 	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
 	log.Printf("starting server on %s", addr)
