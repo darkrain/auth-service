@@ -40,11 +40,14 @@ func CreateAPIKey(ctx context.Context, pool *pgxpool.Pool, userID int) (*APIKey,
 	var id int
 	var createdAt time.Time
 
+	// API keys don't expire — use a far-future date (100 years)
+	apiKeyExpiry := time.Now().AddDate(100, 0, 0)
+
 	err := pool.QueryRow(ctx, `
-		INSERT INTO sessions (user_id, token, auth_type, blocked)
-		VALUES ($1, $2, 'api', false)
+		INSERT INTO sessions (user_id, token, auth_type, blocked, expire_date)
+		VALUES ($1, $2, 'api', false, $3)
 		RETURNING id, creation_date
-	`, userID, token).Scan(&id, &createdAt)
+	`, userID, token, apiKeyExpiry).Scan(&id, &createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("db: insert api key: %w", err)
 	}
