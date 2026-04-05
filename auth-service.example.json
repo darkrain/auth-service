@@ -22,6 +22,7 @@
   "RmqExchangeName": "mail",
   "RmqExchangeKind": "direct",
   "SessionTTLDays": 30,
+  "TwoFactorEnabled": false,
   "RateLimit": {
     "IP": {
       "LoginMaxAttempts": 5,

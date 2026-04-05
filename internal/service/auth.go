@@ -38,7 +38,16 @@ type LoginResult struct {
 	ExpireDate time.Time
 }
 
+// Login2FARequest holds the request for 2FA login verification.
+type Login2FARequest struct {
+	Login     string
+	Code      string
+	DeviceUID string
+	IP        string
+}
+
 // Login validates credentials, creates a session, and returns a token.
+// If cfg.TwoFactorEnabled is true and password is valid, returns Err2FA without creating session.
 func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, login, password, ip string) (*LoginResult, error) {
 	login = strings.TrimSpace(login)
 	password = strings.TrimSpace(password)
@@ -88,6 +97,13 @@ func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, login, p
 		return nil, fmt.Errorf("%w: invalid credentials", ErrUnauthorized)
 	}
 
+	// 2FA: if enabled, send code and return Err2FA instead of creating session
+	if cfg.TwoFactorEnabled {
+		// deviceUID not available here — caller must handle via /auth/login/verify-2fa
+		// We just signal that 2FA is required; SendCode is called from the handler
+		return nil, fmt.Errorf("%w: 2fa required", Err2FA)
+	}
+
 	// Generate token
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
@@ -117,6 +133,108 @@ func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, login, p
 		Token:      token,
 		ExpireDate: expireDate,
 	}, nil
+}
+
+// createSession generates a token, inserts a session, and returns LoginResult.
+func createSession(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, userID int64, ip string) (*LoginResult, error) {
+	// Generate token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, fmt.Errorf("token generation: %w", err)
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	// Calculate expiry
+	ttlDays := cfg.SessionTTLDays
+	if ttlDays <= 0 {
+		ttlDays = 30
+	}
+	expireDate := time.Now().Add(time.Duration(ttlDays) * 24 * time.Hour)
+
+	if pool != nil {
+		_, err := pool.Exec(ctx,
+			`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked) VALUES ($1, $2, $3, $4, $5, false)`,
+			userID, token, expireDate, "password", ip,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("db: insert session: %w", err)
+		}
+	}
+
+	return &LoginResult{
+		Token:      token,
+		ExpireDate: expireDate,
+	}, nil
+}
+
+// LoginVerify2FA verifies the 2FA code for a given login and creates a session if valid.
+func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, req Login2FARequest) (*LoginResult, error) {
+	req.Login = strings.TrimSpace(req.Login)
+	if req.Login == "" {
+		return nil, fmt.Errorf("%w: login is required", ErrValidation)
+	}
+
+	// Determine field type and find user
+	isEmail := strings.Contains(req.Login, "@")
+
+	var userID int64
+	if pool != nil {
+		var query string
+		if isEmail {
+			query = `SELECT id FROM users WHERE email = $1 LIMIT 1`
+		} else {
+			query = `SELECT id FROM users WHERE phone = $1 LIMIT 1`
+		}
+		if err := pool.QueryRow(ctx, query, req.Login).Scan(&userID); err != nil {
+			return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+		}
+	}
+
+	// Verify the code (uses email/phone type for user update)
+	verifyType := "phone"
+	if isEmail {
+		verifyType = "email"
+	}
+
+	// For 2FA verify, we just check and delete the code but don't set email_verified/phone_verified here
+	// We do a direct code check without updating user's verified status
+	if pool != nil {
+		var storedCode string
+		var counter int64
+		var sentTS int64
+
+		err := pool.QueryRow(ctx,
+			`SELECT code, counter, sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 LIMIT 1`,
+			req.DeviceUID, req.Login,
+		).Scan(&storedCode, &counter, &sentTS)
+		if err != nil {
+			return nil, fmt.Errorf("%w: verification code not found", ErrNotFound)
+		}
+
+		now := time.Now().Unix()
+		if cfg.RateLimit.Code.TTLSec > 0 && sentTS+int64(cfg.RateLimit.Code.TTLSec) <= now {
+			return nil, fmt.Errorf("%w: verification code has expired", ErrValidation)
+		}
+		if cfg.RateLimit.Code.MaxAttempts > 0 && counter >= int64(cfg.RateLimit.Code.MaxAttempts) {
+			return nil, fmt.Errorf("%w: Too many attempts. Request a new code.", ErrTooManyRequests)
+		}
+		if req.Code != storedCode {
+			_, _ = pool.Exec(ctx,
+				`UPDATE confirm_codes SET counter=counter+1 WHERE device_uid=$1 AND recipient=$2`,
+				req.DeviceUID, req.Login,
+			)
+			return nil, fmt.Errorf("%w: invalid verification code", ErrUnauthorized)
+		}
+
+		// Delete the used code
+		_, _ = pool.Exec(ctx,
+			`DELETE FROM confirm_codes WHERE device_uid=$1 AND recipient=$2`,
+			req.DeviceUID, req.Login,
+		)
+		_ = verifyType // used for VerifyCode path, not needed here
+	}
+
+	return createSession(ctx, pool, cfg, userID, req.IP)
 }
 
 // Logout marks a session as blocked.

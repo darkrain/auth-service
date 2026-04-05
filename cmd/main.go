@@ -89,8 +89,12 @@ func main() {
 	})
 
 	r.POST("/auth/register", handler.Register(pgPool, rmqConn, cfg))
-	r.POST("/auth/login", handler.Login(pgPool, cfg))
+	r.POST("/auth/login", handler.Login(pgPool, rmqConn, cfg))
 	r.POST("/auth/logout", handler.Logout(pgPool))
+	r.POST("/auth/send-code", handler.SendCode(pgPool, rmqConn, cfg))
+	r.POST("/auth/verify/email", handler.VerifyEmail(pgPool, cfg))
+	r.POST("/auth/verify/phone", handler.VerifyPhone(pgPool, cfg))
+	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pgPool, cfg))
 
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")
