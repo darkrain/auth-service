@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -63,7 +64,7 @@ func ListAPIKeys(pool *pgxpool.Pool) gin.HandlerFunc {
 }
 
 // RevokeAPIKey handles DELETE /auth/api-keys/:id
-func RevokeAPIKey(pool *pgxpool.Pool) gin.HandlerFunc {
+func RevokeAPIKey(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
 		if !exists {
@@ -83,7 +84,7 @@ func RevokeAPIKey(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		if err := service.RevokeAPIKey(c.Request.Context(), pool, keyID, userID); err != nil {
+		if err := service.RevokeAPIKey(c.Request.Context(), pool, cacheClient, keyID, userID); err != nil {
 			if errors.Is(err, service.ErrNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "API key not found"})
 				return

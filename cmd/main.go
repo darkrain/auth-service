@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/darkrain/auth-service/internal/broker"
+	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/db"
 	"github.com/darkrain/auth-service/internal/handler"
@@ -72,6 +73,8 @@ func main() {
 		}
 	}()
 
+	cacheClient := cache.NewClient(cfg)
+
 	// RabbitMQ
 	rmqConn, err := broker.Connect(cfg)
 	if err != nil {
@@ -90,7 +93,7 @@ func main() {
 
 	r.POST("/auth/register", handler.Register(pgPool, rmqConn, cfg))
 	r.POST("/auth/login", handler.Login(pgPool, rmqConn, cfg))
-	r.POST("/auth/logout", handler.Logout(pgPool))
+	r.POST("/auth/logout", handler.Logout(pgPool, cacheClient))
 	r.POST("/auth/send-code", handler.SendCode(pgPool, rmqConn, cfg))
 	r.POST("/auth/verify/email", handler.VerifyEmail(pgPool, cfg))
 	r.POST("/auth/verify/phone", handler.VerifyPhone(pgPool, cfg))
@@ -98,14 +101,17 @@ func main() {
 
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")
-	authRequired.Use(middleware.Auth(pgPool))
+	authRequired.Use(middleware.Auth(pgPool, cacheClient))
 
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")
 	apiKeys.Use(middleware.RequireRole("admin", "system"))
 	apiKeys.POST("", handler.CreateAPIKey(pgPool))
 	apiKeys.GET("", handler.ListAPIKeys(pgPool))
-	apiKeys.DELETE("/:id", handler.RevokeAPIKey(pgPool))
+	apiKeys.DELETE("/:id", handler.RevokeAPIKey(pgPool, cacheClient))
+
+	// Authenticated user info
+	authRequired.GET("/auth/me", handler.Me())
 
 	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
 	log.Printf("starting server on %s", addr)

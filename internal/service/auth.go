@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -237,14 +238,17 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 	return createSession(ctx, pool, cfg, userID, req.IP)
 }
 
-// Logout marks a session as blocked.
-func Logout(ctx context.Context, pool *pgxpool.Pool, token string) error {
+// Logout marks a session as blocked and invalidates the Redis cache.
+func Logout(ctx context.Context, pool *pgxpool.Pool, cacheClient *cache.Client, token string) error {
 	if pool == nil {
 		return nil
 	}
 	_, err := pool.Exec(ctx, `UPDATE sessions SET blocked=true WHERE token=$1`, token)
 	if err != nil {
 		return fmt.Errorf("db: update session: %w", err)
+	}
+	if cacheClient != nil {
+		_ = cacheClient.DeleteSession(ctx, token)
 	}
 	return nil
 }
