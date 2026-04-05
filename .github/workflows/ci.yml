@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  workflow_dispatch:  # manual trigger only
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - name: Run gosec
+        run: gosec ./...
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: auth
+          POSTGRES_PASSWORD: auth
+          POSTGRES_DB: auth_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Create test config
+        run: |
+          cat > auth-service.test.json << 'EOF'
+          {
+            "Host": "localhost",
+            "Port": "8081",
+            "PasswordSalt": "test_salt",
+            "PasswordMinLength": 6,
+            "PasswordRequireDigits": true,
+            "PasswordRequireSpecial": false,
+            "SystemUserEmail": "system@test.internal",
+            "SystemUserPassword": "System123",
+            "TwoFactorEnabled": false,
+            "SessionTTLDays": 1,
+            "PostgreSqlHost": "localhost",
+            "PostgreSqlPort": "5433",
+            "PostgreSqlUserName": "auth",
+            "PostgreSqlPassword": "auth",
+            "PostgreSqlDatabase": "auth_test",
+            "RedisDatabaseNetwork": "tcp",
+            "RedisDatabaseHost": "localhost",
+            "RedisDatabasePort": "6380",
+            "RmqHost": "",
+            "RmqUser": "",
+            "RmqPassword": "",
+            "RmqQueueMailName": "sendmail",
+            "RmqExchangeName": "mail",
+            "RmqExchangeKind": "direct",
+            "RateLimit": {
+              "IP": {"LoginMaxAttempts": 100, "LoginWindowSec": 60, "RegisterMaxAttempts": 100, "RegisterWindowSec": 60},
+              "Device": {"LoginMaxAttempts": 100, "LoginWindowSec": 60, "SendCodeMaxAttempts": 100, "SendCodeWindowSec": 60, "RegisterMaxAttempts": 100, "RegisterWindowSec": 60},
+              "Account": {"MaxFailedLogins": 100, "LockDurationSec": 60},
+              "Code": {"MaxAttempts": 10, "TTLSec": 300}
+            }
+          }
+          EOF
+      - name: Run integration tests
+        run: go test -v -race -timeout 120s ./tests/integration/...

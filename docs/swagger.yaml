@@ -1,0 +1,500 @@
+basePath: /
+definitions:
+  handler.apiKeyResponse:
+    properties:
+      created_at:
+        example: "2025-01-01T00:00:00Z"
+        type: string
+      id:
+        example: 1
+        type: integer
+      token:
+        example: ak_...
+        type: string
+    type: object
+  handler.errorResponse:
+    properties:
+      error:
+        example: error description
+        type: string
+    type: object
+  handler.login2FAResponse:
+    properties:
+      message:
+        example: Code sent to your email/phone. Please verify.
+        type: string
+      requires_2fa:
+        example: true
+        type: boolean
+    type: object
+  handler.loginRequest:
+    properties:
+      device_uid:
+        example: device-uuid-1234
+        type: string
+      login:
+        example: user@example.com
+        type: string
+      password:
+        example: Secret123!
+        type: string
+    type: object
+  handler.loginResponse:
+    properties:
+      expire_date:
+        example: "2025-01-01T00:00:00Z"
+        type: string
+      token:
+        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        type: string
+    type: object
+  handler.meResponse:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+      id:
+        example: 1
+        type: integer
+      phone:
+        example: "+79001234567"
+        type: string
+      role:
+        example: user
+        type: string
+      verify_status:
+        example: verified
+        type: string
+    type: object
+  handler.messageResponse:
+    properties:
+      message:
+        example: Operation successful
+        type: string
+    type: object
+  handler.registerRequest:
+    properties:
+      login:
+        example: user@example.com
+        type: string
+      password:
+        example: Secret123!
+        type: string
+    type: object
+  handler.sendCodeRequest:
+    properties:
+      device_uid:
+        example: device-uuid-1234
+        type: string
+      recipient:
+        example: user@example.com
+        type: string
+    type: object
+  handler.verifyCodeRequest:
+    properties:
+      code:
+        example: "123456"
+        type: string
+      device_uid:
+        example: device-uuid-1234
+        type: string
+      recipient:
+        example: user@example.com
+        type: string
+    type: object
+  handler.verifyLogin2FARequest:
+    properties:
+      code:
+        example: "123456"
+        type: string
+      device_uid:
+        example: device-uuid-1234
+        type: string
+      login:
+        example: user@example.com
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    name: darkrain
+    url: https://github.com/darkrain/auth-service
+  description: Authentication and authorization microservice with JWT sessions, 2FA,
+    and API key management.
+  license:
+    name: MIT
+  termsOfService: http://swagger.io/terms/
+  title: Auth Service API
+  version: "1.0"
+paths:
+  /auth/api-keys:
+    get:
+      description: Returns all API keys belonging to the authenticated user. Requires
+        admin or system role.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handler.apiKeyResponse'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: List API keys
+      tags:
+      - api-keys
+    post:
+      description: Creates a new API key for the authenticated user. Requires admin
+        or system role.
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handler.apiKeyResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a new API key
+      tags:
+      - api-keys
+  /auth/api-keys/{id}:
+    delete:
+      description: Revokes and deletes an API key by ID. Requires admin or system
+        role.
+      parameters:
+      - description: API key ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Revoke an API key
+      tags:
+      - api-keys
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticates a user by login (email or phone) and password. Returns
+        a JWT token on success, or 202 if 2FA is required.
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.loginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.loginResponse'
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/handler.login2FAResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Login with email/phone and password
+      tags:
+      - auth
+  /auth/login/verify-2fa:
+    post:
+      consumes:
+      - application/json
+      description: Completes the login process by verifying a 2FA code. Returns a
+        JWT token on success.
+      parameters:
+      - description: Login, 2FA code and device UID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.verifyLogin2FARequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.loginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Verify 2FA code during login
+      tags:
+      - auth
+  /auth/logout:
+    post:
+      consumes:
+      - application/json
+      description: Invalidates the current session token. Requires a Bearer token
+        in the Authorization header.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.messageResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Logout and invalidate token
+      tags:
+      - auth
+  /auth/me:
+    get:
+      description: Returns information about the currently authenticated user based
+        on the session token.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.meResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get current user info
+      tags:
+      - auth
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Creates a new user account. Login can be an email address or a
+        phone number. A verification code will be sent to the provided contact.
+      parameters:
+      - description: Registration data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.registerRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Register a new user
+      tags:
+      - auth
+  /auth/send-code:
+    post:
+      consumes:
+      - application/json
+      description: Sends a verification code to the specified email or phone number.
+      parameters:
+      - description: Recipient and device UID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.sendCodeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Send verification code
+      tags:
+      - verification
+  /auth/verify/email:
+    post:
+      consumes:
+      - application/json
+      description: Verifies a user's email address using a code sent to them.
+      parameters:
+      - description: Email, code and device UID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.verifyCodeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Verify email address
+      tags:
+      - verification
+  /auth/verify/phone:
+    post:
+      consumes:
+      - application/json
+      description: Verifies a user's phone number using a code sent to them.
+      parameters:
+      - description: Phone, code and device UID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.verifyCodeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Verify phone number
+      tags:
+      - verification
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and the JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
