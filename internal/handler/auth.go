@@ -13,12 +13,13 @@ import (
 )
 
 type loginRequest struct {
-	Login    string `json:"login"`
-	Password string `json:"password"`
+	Login     string `json:"login"`
+	Password  string `json:"password"`
+	DeviceUID string `json:"device_uid"`
 }
 
 // Login handles POST /auth/login
-func Login(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
+func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req loginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -35,6 +36,13 @@ func Login(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 		result, err := service.Login(c.Request.Context(), pool, cfg, req.Login, req.Password, ip)
 		if err != nil {
 			switch {
+			case errors.Is(err, service.Err2FA):
+				// Send code and return 202
+				_ = service.SendCode(c.Request.Context(), pool, conn, cfg, req.Login, req.DeviceUID)
+				c.JSON(http.StatusAccepted, gin.H{
+					"message":      "Code sent to your email/phone. Please verify.",
+					"requires_2fa": true,
+				})
 			case errors.Is(err, service.ErrValidation):
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			case errors.Is(err, service.ErrNotFound):

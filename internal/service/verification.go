@@ -1,0 +1,217 @@
+package service
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math/big"
+	"strings"
+	"time"
+
+	"github.com/darkrain/auth-service/internal/config"
+	"github.com/jackc/pgx/v5/pgxpool"
+	amqp "github.com/rabbitmq/amqp091-go"
+)
+
+// ErrTooManyRequests is returned when the rate limit is exceeded.
+var ErrTooManyRequests = errors.New("too many requests")
+
+// Err2FA is returned when 2FA is required after successful password check.
+var Err2FA = errors.New("2fa required")
+
+// SendCode generates a 6-digit verification code and publishes it to RabbitMQ.
+// Rate-limited: if an existing code's TTL hasn't expired, returns ErrTooManyRequests.
+func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, recipient, deviceUID string) error {
+	recipient = strings.TrimSpace(recipient)
+	if recipient == "" {
+		return fmt.Errorf("%w: recipient is required", ErrValidation)
+	}
+
+	isEmail := strings.Contains(recipient, "@")
+
+	// Find user_id by recipient
+	var userID int64
+	if pool != nil {
+		var query string
+		if isEmail {
+			query = `SELECT id FROM users WHERE email = $1 LIMIT 1`
+		} else {
+			query = `SELECT id FROM users WHERE phone = $1 LIMIT 1`
+		}
+		if err := pool.QueryRow(ctx, query, recipient).Scan(&userID); err != nil {
+			// user not found — still proceed (don't leak existence)
+			userID = 0
+		}
+	}
+
+	// Check rate limit: if existing record has unexpired TTL, reject
+	if pool != nil && cfg.RateLimit.Code.TTLSec > 0 {
+		var oldSentTS int64
+		err := pool.QueryRow(ctx,
+			`SELECT sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 LIMIT 1`,
+			deviceUID, recipient,
+		).Scan(&oldSentTS)
+		if err == nil {
+			// Record exists — check TTL
+			now := time.Now().Unix()
+			if oldSentTS+int64(cfg.RateLimit.Code.TTLSec) > now {
+				return fmt.Errorf("%w: code already sent, please wait before requesting a new one", ErrTooManyRequests)
+			}
+		}
+		// err != nil means no row → first time, fine
+	}
+
+	// Generate 6-digit code
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return fmt.Errorf("crypto/rand: %w", err)
+	}
+	code := fmt.Sprintf("%06d", n.Int64())
+
+	now := time.Now().Unix()
+
+	// UPSERT into confirm_codes
+	if pool != nil {
+		_, err = pool.Exec(ctx,
+			`INSERT INTO confirm_codes (device_uid, recipient, code, counter, sent_ts)
+			 VALUES ($1, $2, $3, 0, $4)
+			 ON CONFLICT (device_uid, recipient) DO UPDATE
+			 SET code = EXCLUDED.code, counter = 0, sent_ts = EXCLUDED.sent_ts`,
+			deviceUID, recipient, code, now,
+		)
+		if err != nil {
+			return fmt.Errorf("db: upsert confirm_codes: %w", err)
+		}
+	}
+
+	// Publish event to RabbitMQ
+	if conn != nil {
+		eventType := "phone_verification"
+		if isEmail {
+			eventType = "email_verification"
+		}
+
+		type verificationEvent struct {
+			Type      string `json:"type"`
+			Recipient string `json:"recipient"`
+			Code      string `json:"code"`
+			UserID    int64  `json:"user_id"`
+		}
+
+		payload, err := json.Marshal(verificationEvent{
+			Type:      eventType,
+			Recipient: recipient,
+			Code:      code,
+			UserID:    userID,
+		})
+		if err != nil {
+			return fmt.Errorf("json: marshal event: %w", err)
+		}
+
+		ch, err := conn.Channel()
+		if err != nil {
+			return fmt.Errorf("broker: open channel: %w", err)
+		}
+		defer ch.Close()
+
+		if err := ch.ExchangeDeclare(
+			cfg.RmqExchangeName,
+			cfg.RmqExchangeKind,
+			true,
+			false,
+			false,
+			false,
+			nil,
+		); err != nil {
+			return fmt.Errorf("broker: declare exchange: %w", err)
+		}
+
+		if err := ch.PublishWithContext(ctx,
+			cfg.RmqExchangeName,
+			cfg.RmqQueueMailName,
+			false,
+			false,
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        payload,
+			},
+		); err != nil {
+			return fmt.Errorf("broker: publish: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// VerifyCode checks a verification code for the given recipient+deviceUID.
+// verifyType must be "email" or "phone".
+func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, recipient, code, deviceUID, verifyType string) error {
+	recipient = strings.TrimSpace(recipient)
+	code = strings.TrimSpace(code)
+
+	if pool == nil {
+		return nil
+	}
+
+	var storedCode string
+	var counter int64
+	var sentTS int64
+
+	err := pool.QueryRow(ctx,
+		`SELECT code, counter, sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 LIMIT 1`,
+		deviceUID, recipient,
+	).Scan(&storedCode, &counter, &sentTS)
+	if err != nil {
+		return fmt.Errorf("%w: verification code not found", ErrNotFound)
+	}
+
+	now := time.Now().Unix()
+
+	// Check TTL
+	if cfg.RateLimit.Code.TTLSec > 0 && sentTS+int64(cfg.RateLimit.Code.TTLSec) <= now {
+		return fmt.Errorf("%w: verification code has expired", ErrValidation)
+	}
+
+	// Check attempt counter
+	if cfg.RateLimit.Code.MaxAttempts > 0 && counter >= int64(cfg.RateLimit.Code.MaxAttempts) {
+		return fmt.Errorf("%w: Too many attempts. Request a new code.", ErrTooManyRequests)
+	}
+
+	// Compare code
+	if code != storedCode {
+		// Increment counter
+		_, _ = pool.Exec(ctx,
+			`UPDATE confirm_codes SET counter=counter+1 WHERE device_uid=$1 AND recipient=$2`,
+			deviceUID, recipient,
+		)
+		return fmt.Errorf("%w: invalid verification code", ErrUnauthorized)
+	}
+
+	// Code is correct — update user and delete confirm record
+	if verifyType == "email" {
+		_, err = pool.Exec(ctx,
+			`UPDATE users SET email_verified=true, verify_status='verified' WHERE email=$1`,
+			recipient,
+		)
+	} else {
+		_, err = pool.Exec(ctx,
+			`UPDATE users SET phone_verified=true, verify_status='verified' WHERE phone=$1`,
+			recipient,
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("db: update user verified: %w", err)
+	}
+
+	_, err = pool.Exec(ctx,
+		`DELETE FROM confirm_codes WHERE device_uid=$1 AND recipient=$2`,
+		deviceUID, recipient,
+	)
+	if err != nil {
+		return fmt.Errorf("db: delete confirm_codes: %w", err)
+	}
+
+	return nil
+}

@@ -64,6 +64,7 @@ type Config struct {
 	RmqExchangeKind       string    `json:"RmqExchangeKind"`
 	RateLimit             RateLimit `json:"RateLimit"`
 	SessionTTLDays        int       `json:"SessionTTLDays"`
+	TwoFactorEnabled      bool      `json:"TwoFactorEnabled"`
 }
 
 func Load(path string) (*Config, error) {
