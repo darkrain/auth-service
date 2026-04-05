@@ -33,6 +33,9 @@ var ErrUnauthorized = errors.New("unauthorized")
 // ErrForbidden is returned when access is denied due to account status.
 var ErrForbidden = errors.New("forbidden")
 
+// ErrAccountLocked is returned when the account is temporarily locked.
+var ErrAccountLocked = errors.New("account locked")
+
 // LoginResult holds the result of a successful login.
 type LoginResult struct {
 	Token      string
@@ -49,7 +52,8 @@ type Login2FARequest struct {
 
 // Login validates credentials, creates a session, and returns a token.
 // If cfg.TwoFactorEnabled is true and password is valid, returns Err2FA without creating session.
-func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, login, password, ip string) (*LoginResult, error) {
+// cacheClient is used for account lock checks; may be nil.
+func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cacheClient *cache.Client, login, password, ip string) (*LoginResult, error) {
 	login = strings.TrimSpace(login)
 	password = strings.TrimSpace(password)
 
@@ -93,9 +97,26 @@ func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, login, p
 		return nil, fmt.Errorf("%w: Account access denied.", ErrForbidden)
 	}
 
+	// Check account lock (before password verification)
+	if cacheClient != nil {
+		locked, err := cacheClient.IsAccountLocked(ctx, int(userID))
+		if err == nil && locked {
+			return nil, fmt.Errorf("%w: account is temporarily locked", ErrAccountLocked)
+		}
+	}
+
 	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(cfg.PasswordSalt+password)); err != nil {
+		// Increment failed login counter
+		if cacheClient != nil {
+			_ = cacheClient.IncrFailedLogin(ctx, int(userID), cfg.RateLimit.Account.MaxFailedLogins, cfg.RateLimit.Account.LockDurationSec)
+		}
 		return nil, fmt.Errorf("%w: invalid credentials", ErrUnauthorized)
+	}
+
+	// Reset failed login counter on successful password verification
+	if cacheClient != nil {
+		_ = cacheClient.ResetFailedLogin(ctx, int(userID))
 	}
 
 	// 2FA: if enabled, send code and return Err2FA instead of creating session

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/darkrain/auth-service/internal/config"
@@ -67,4 +68,65 @@ func (c *Client) SetSession(ctx context.Context, token string, data *SessionData
 // DeleteSession removes session data from Redis cache.
 func (c *Client) DeleteSession(ctx context.Context, token string) error {
 	return c.rdb.Del(ctx, sessionKey(token)).Err()
+}
+
+// SlidingWindowIncr increments a sliding window counter in Redis.
+// Uses INCR + EXPIRE pattern: if key is new (count==1), set TTL to windowSec.
+// Returns the current count after increment.
+func (c *Client) SlidingWindowIncr(ctx context.Context, key string, windowSec int) (int64, error) {
+	count, err := c.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	if count == 1 {
+		_ = c.rdb.Expire(ctx, key, time.Duration(windowSec)*time.Second).Err()
+	}
+	return count, nil
+}
+
+// IsAccountLocked checks whether an account is temporarily locked.
+// Key: "lock:user:{userID}"
+func (c *Client) IsAccountLocked(ctx context.Context, userID int) (bool, error) {
+	key := fmt.Sprintf("lock:user:%d", userID)
+	exists, err := c.rdb.Exists(ctx, key).Result()
+	if err != nil {
+		return false, err
+	}
+	return exists > 0, nil
+}
+
+// LockAccount temporarily locks an account for durationSec seconds.
+// Key: "lock:user:{userID}"
+func (c *Client) LockAccount(ctx context.Context, userID int, durationSec int) error {
+	key := fmt.Sprintf("lock:user:%d", userID)
+	return c.rdb.Set(ctx, key, 1, time.Duration(durationSec)*time.Second).Err()
+}
+
+// IncrFailedLogin increments the failed login counter for a user.
+// If the counter reaches maxAttempts, the account is locked for lockDurationSec seconds.
+// Key: "failedlogin:{userID}"
+func (c *Client) IncrFailedLogin(ctx context.Context, userID int, maxAttempts int, lockDurationSec int) error {
+	key := fmt.Sprintf("failedlogin:%d", userID)
+	count, err := c.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return err
+	}
+	// Set TTL on first increment to auto-expire the counter
+	if count == 1 {
+		_ = c.rdb.Expire(ctx, key, time.Duration(lockDurationSec)*time.Second).Err()
+	}
+	if maxAttempts > 0 && count >= int64(maxAttempts) {
+		if lockErr := c.LockAccount(ctx, userID, lockDurationSec); lockErr != nil {
+			return lockErr
+		}
+		_ = c.rdb.Del(ctx, key).Err()
+	}
+	return nil
+}
+
+// ResetFailedLogin resets the failed login counter on successful login.
+// Key: "failedlogin:{userID}"
+func (c *Client) ResetFailedLogin(ctx context.Context, userID int) error {
+	key := fmt.Sprintf("failedlogin:%d", userID)
+	return c.rdb.Del(ctx, key).Err()
 }

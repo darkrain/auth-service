@@ -20,7 +20,7 @@ type loginRequest struct {
 }
 
 // Login handles POST /auth/login
-func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin.HandlerFunc {
+func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req loginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -34,7 +34,7 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin.Ha
 			ip = c.Request.RemoteAddr
 		}
 
-		result, err := service.Login(c.Request.Context(), pool, cfg, req.Login, req.Password, ip)
+		result, err := service.Login(c.Request.Context(), pool, cfg, cacheClient, req.Login, req.Password, ip)
 		if err != nil {
 			switch {
 			case errors.Is(err, service.Err2FA):
@@ -44,6 +44,8 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin.Ha
 					"message":      "Code sent to your email/phone. Please verify.",
 					"requires_2fa": true,
 				})
+			case errors.Is(err, service.ErrAccountLocked):
+				c.JSON(http.StatusTooManyRequests, gin.H{"error": "Account temporarily locked due to too many failed attempts"})
 			case errors.Is(err, service.ErrValidation):
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			case errors.Is(err, service.ErrNotFound):
