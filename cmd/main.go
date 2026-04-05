@@ -91,10 +91,22 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
 
-	r.POST("/auth/register", handler.Register(pgPool, rmqConn, cfg))
-	r.POST("/auth/login", handler.Login(pgPool, rmqConn, cfg))
+	r.POST("/auth/register",
+		middleware.RateLimit(cacheClient, rmqConn, "/auth/register",
+			cfg.RateLimit.IP.RegisterMaxAttempts, cfg.RateLimit.IP.RegisterWindowSec,
+			cfg.RateLimit.Device.RegisterMaxAttempts, cfg.RateLimit.Device.RegisterWindowSec),
+		handler.Register(pgPool, rmqConn, cfg))
+	r.POST("/auth/login",
+		middleware.RateLimit(cacheClient, rmqConn, "/auth/login",
+			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
+			cfg.RateLimit.Device.LoginMaxAttempts, cfg.RateLimit.Device.LoginWindowSec),
+		handler.Login(pgPool, rmqConn, cfg, cacheClient))
 	r.POST("/auth/logout", handler.Logout(pgPool, cacheClient))
-	r.POST("/auth/send-code", handler.SendCode(pgPool, rmqConn, cfg))
+	r.POST("/auth/send-code",
+		middleware.RateLimit(cacheClient, rmqConn, "/auth/send-code",
+			0, 0,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.SendCode(pgPool, rmqConn, cfg))
 	r.POST("/auth/verify/email", handler.VerifyEmail(pgPool, cfg))
 	r.POST("/auth/verify/phone", handler.VerifyPhone(pgPool, cfg))
 	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pgPool, cfg))
