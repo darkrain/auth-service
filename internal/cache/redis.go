@@ -130,3 +130,9 @@ func (c *Client) ResetFailedLogin(ctx context.Context, userID int) error {
 	key := fmt.Sprintf("failedlogin:%d", userID)
 	return c.rdb.Del(ctx, key).Err()
 }
+
+// FlushTestDB flushes all keys from the current Redis database.
+// ONLY use in tests — never call this in production code.
+func (c *Client) FlushTestDB(ctx context.Context) error {
+	return c.rdb.FlushDB(ctx).Err()
+}

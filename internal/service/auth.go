@@ -223,7 +223,7 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 	if pool != nil {
 		var storedCode string
 		var counter int64
-		var sentTS int64
+		var sentTS time.Time
 
 		err := pool.QueryRow(ctx,
 			`SELECT code, counter, sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 LIMIT 1`,
@@ -233,9 +233,11 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 			return nil, fmt.Errorf("%w: verification code not found", ErrNotFound)
 		}
 
-		now := time.Now().Unix()
-		if cfg.RateLimit.Code.TTLSec > 0 && sentTS+int64(cfg.RateLimit.Code.TTLSec) <= now {
-			return nil, fmt.Errorf("%w: verification code has expired", ErrValidation)
+		if cfg.RateLimit.Code.TTLSec > 0 {
+			expiry := sentTS.Add(time.Duration(cfg.RateLimit.Code.TTLSec) * time.Second)
+			if time.Now().After(expiry) {
+				return nil, fmt.Errorf("%w: verification code has expired", ErrValidation)
+			}
 		}
 		if cfg.RateLimit.Code.MaxAttempts > 0 && counter >= int64(cfg.RateLimit.Code.MaxAttempts) {
 			return nil, fmt.Errorf("%w: Too many attempts. Request a new code.", ErrTooManyRequests)

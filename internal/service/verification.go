@@ -48,15 +48,15 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 
 	// Check rate limit: if existing record has unexpired TTL, reject
 	if pool != nil && cfg.RateLimit.Code.TTLSec > 0 {
-		var oldSentTS int64
+		var oldSentTS time.Time
 		err := pool.QueryRow(ctx,
 			`SELECT sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 LIMIT 1`,
 			deviceUID, recipient,
 		).Scan(&oldSentTS)
 		if err == nil {
 			// Record exists — check TTL
-			now := time.Now().Unix()
-			if oldSentTS+int64(cfg.RateLimit.Code.TTLSec) > now {
+			expiry := oldSentTS.Add(time.Duration(cfg.RateLimit.Code.TTLSec) * time.Second)
+			if time.Now().Before(expiry) {
 				return fmt.Errorf("%w: code already sent, please wait before requesting a new one", ErrTooManyRequests)
 			}
 		}
@@ -70,7 +70,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	}
 	code := fmt.Sprintf("%06d", n.Int64())
 
-	now := time.Now().Unix()
+	now := time.Now()
 
 	// UPSERT into confirm_codes
 	if pool != nil {
@@ -157,7 +157,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, rec
 
 	var storedCode string
 	var counter int64
-	var sentTS int64
+	var sentTS time.Time
 
 	err := pool.QueryRow(ctx,
 		`SELECT code, counter, sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 LIMIT 1`,
@@ -167,11 +167,12 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, rec
 		return fmt.Errorf("%w: verification code not found", ErrNotFound)
 	}
 
-	now := time.Now().Unix()
-
 	// Check TTL
-	if cfg.RateLimit.Code.TTLSec > 0 && sentTS+int64(cfg.RateLimit.Code.TTLSec) <= now {
-		return fmt.Errorf("%w: verification code has expired", ErrValidation)
+	if cfg.RateLimit.Code.TTLSec > 0 {
+		expiry := sentTS.Add(time.Duration(cfg.RateLimit.Code.TTLSec) * time.Second)
+		if time.Now().After(expiry) {
+			return fmt.Errorf("%w: verification code has expired", ErrValidation)
+		}
 	}
 
 	// Check attempt counter
