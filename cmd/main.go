@@ -11,6 +11,7 @@ import (
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/db"
 	"github.com/darkrain/auth-service/internal/handler"
+	"github.com/darkrain/auth-service/internal/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -90,6 +91,17 @@ func main() {
 	r.POST("/auth/register", handler.Register(pgPool, rmqConn, cfg))
 	r.POST("/auth/login", handler.Login(pgPool, cfg))
 	r.POST("/auth/logout", handler.Logout(pgPool))
+
+	// Protected routes (require valid session token)
+	authRequired := r.Group("/")
+	authRequired.Use(middleware.Auth(pgPool))
+
+	// API key management (admin and system only)
+	apiKeys := authRequired.Group("/auth/api-keys")
+	apiKeys.Use(middleware.RequireRole("admin", "system"))
+	apiKeys.POST("", handler.CreateAPIKey(pgPool))
+	apiKeys.GET("", handler.ListAPIKeys(pgPool))
+	apiKeys.DELETE("/:id", handler.RevokeAPIKey(pgPool))
 
 	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
 	log.Printf("starting server on %s", addr)
