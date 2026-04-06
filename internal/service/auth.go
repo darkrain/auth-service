@@ -13,6 +13,7 @@ import (
 
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/validator"
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
@@ -20,6 +21,12 @@ import (
 
 // ErrValidation is returned when request data is invalid.
 var ErrValidation = errors.New("validation error")
+
+// ErrInvalidEmail is returned when the email format is invalid.
+var ErrInvalidEmail = errors.New("invalid email format")
+
+// ErrInvalidPhone is returned when the phone format is invalid.
+var ErrInvalidPhone = errors.New("invalid phone format")
 
 // ErrAlreadyExists is returned when email/phone is already taken.
 var ErrAlreadyExists = errors.New("already exists")
@@ -299,6 +306,17 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 
 	// 3. Determine login type
 	isEmail := strings.Contains(req.Login, "@")
+
+	// 3a. Validate format
+	if isEmail {
+		if !validator.IsValidEmail(req.Login) {
+			return ErrInvalidEmail
+		}
+	} else {
+		if !validator.IsValidPhone(req.Login) {
+			return ErrInvalidPhone
+		}
+	}
 
 	// 4. Uniqueness check
 	if pool != nil {

@@ -61,6 +61,10 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 		err := service.SendCode(c.Request.Context(), pool, conn, cfg, req.Recipient, req.DeviceUID)
 		if err != nil {
 			switch {
+			case errors.Is(err, service.ErrInvalidEmail):
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+			case errors.Is(err, service.ErrInvalidPhone):
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid phone format. Use international format: +79991234567"})
 			case errors.Is(err, service.ErrTooManyRequests):
 				c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
 			case errors.Is(err, service.ErrValidation):
@@ -187,6 +191,10 @@ func VerifyLogin2FA(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 // handleVerifyError maps service errors to HTTP responses.
 func handleVerifyError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, service.ErrInvalidEmail):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+	case errors.Is(err, service.ErrInvalidPhone):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid phone format. Use international format: +79991234567"})
 	case errors.Is(err, service.ErrTooManyRequests):
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrValidation):

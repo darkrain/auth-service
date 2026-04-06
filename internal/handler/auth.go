@@ -212,6 +212,14 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 			Password: req.Password,
 		})
 		if err != nil {
+			if errors.Is(err, service.ErrInvalidEmail) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+				return
+			}
+			if errors.Is(err, service.ErrInvalidPhone) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid phone format. Use international format: +79991234567"})
+				return
+			}
 			if errors.Is(err, service.ErrValidation) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return

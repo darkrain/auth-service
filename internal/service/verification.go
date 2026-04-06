@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/validator"
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -30,6 +31,17 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	}
 
 	isEmail := strings.Contains(recipient, "@")
+
+	// Validate format
+	if isEmail {
+		if !validator.IsValidEmail(recipient) {
+			return ErrInvalidEmail
+		}
+	} else {
+		if !validator.IsValidPhone(recipient) {
+			return ErrInvalidPhone
+		}
+	}
 
 	// Find user_id by recipient
 	var userID int64
@@ -153,6 +165,18 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, rec
 
 	if pool == nil {
 		return nil
+	}
+
+	// Validate recipient format
+	isEmail := strings.Contains(recipient, "@")
+	if isEmail {
+		if !validator.IsValidEmail(recipient) {
+			return ErrInvalidEmail
+		}
+	} else {
+		if !validator.IsValidPhone(recipient) {
+			return ErrInvalidPhone
+		}
 	}
 
 	var storedCode string
