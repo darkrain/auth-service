@@ -214,12 +214,63 @@ func TestVerifyEmail_AfterVerify_CanLogin(t *testing.T) {
 	password := "Password1"
 	deviceUID := "device-verified-login"
 
-	registerUser(t, login, password)
-	verifyUser(t, login, deviceUID)
+	registrationToken := registerUser(t, login, password)
+	verifyUser(t, login, deviceUID, registrationToken)
 
 	// Now login should succeed
 	token := loginUser(t, login, password)
 	if token == "" {
 		t.Fatal("expected non-empty token after verification")
+	}
+}
+
+// TestRegistrationToken_CannotAccessMe verifies that a registration token
+// cannot be used to access protected non-verify endpoints (GET /auth/me → 403).
+func TestRegistrationToken_CannotAccessMe(t *testing.T) {
+	truncateTables(t)
+
+	login := "regtoken_me@example.com"
+	password := "Password1"
+
+	registrationToken := registerUser(t, login, password)
+	if registrationToken == "" {
+		t.Fatal("expected registration_token in register response")
+	}
+
+	w := doRequest("GET", "/auth/me", nil, registrationToken)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for registration token on /auth/me, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if body["error"] == nil {
+		t.Errorf("expected error field in 403 response")
+	}
+}
+
+// TestRegistrationToken_InvalidatedAfterVerification verifies that after successful
+// email verification the registration token is blocked and cannot be reused.
+func TestRegistrationToken_InvalidatedAfterVerification(t *testing.T) {
+	truncateTables(t)
+
+	login := "regtoken_inv@example.com"
+	password := "Password1"
+	deviceUID := "device-regtoken-inv"
+
+	registrationToken := registerUser(t, login, password)
+	if registrationToken == "" {
+		t.Fatal("expected registration_token in register response")
+	}
+
+	// Verify using the registration token
+	verifyUser(t, login, deviceUID, registrationToken)
+
+	// After verification the registration token should be blocked (401)
+	w := doRequest("POST", "/auth/verify/email", map[string]string{
+		"recipient":  login,
+		"code":       "000000",
+		"device_uid": deviceUID,
+	}, registrationToken)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after registration token invalidation, got %d: %s", w.Code, w.Body.String())
 	}
 }

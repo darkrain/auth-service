@@ -63,7 +63,8 @@ type Config struct {
 	RmqExchangeName       string    `json:"RmqExchangeName"`
 	RmqExchangeKind       string    `json:"RmqExchangeKind"`
 	RateLimit             RateLimit `json:"RateLimit"`
-	SessionTTLDays        int       `json:"SessionTTLDays"`
+	SessionTTLDays           int       `json:"SessionTTLDays"`
+	RegistrationTokenTTLMin  int       `json:"RegistrationTokenTTLMin"`
 	TwoFactorEnabled      bool      `json:"TwoFactorEnabled"`
 	TrustedProxies        []string  `json:"TrustedProxies"`
 }

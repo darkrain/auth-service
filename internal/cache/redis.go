@@ -18,6 +18,7 @@ type SessionData struct {
 	Phone        string `json:"phone"`
 	Role         string `json:"role"`
 	VerifyStatus string `json:"verify_status"`
+	AuthType     string `json:"auth_type"`
 }
 
 // Client wraps a redis.Client with session-specific helpers.

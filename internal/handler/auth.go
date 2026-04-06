@@ -38,6 +38,12 @@ type messageResponse struct {
 	Message string `json:"message" example:"Operation successful"`
 }
 
+type registerResponse struct {
+	Message           string `json:"message" example:"Registration successful. Please verify your email/phone."`
+	RegistrationToken string `json:"registration_token" example:"a3f2c1...hex64"`
+	ExpiresIn         int    `json:"expires_in" example:"1800"`
+}
+
 type errorResponse struct {
 	Error string `json:"error" example:"error description"`
 }
@@ -181,12 +187,12 @@ func Me() gin.HandlerFunc {
 // Register handles POST /auth/register
 //
 //	@Summary		Register a new user
-//	@Description	Creates a new user account. Login can be an email address or a phone number. A verification code will be sent to the provided contact.
+//	@Description	Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls.
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body		registerRequest	true	"Registration data"
-//	@Success		201		{object}	messageResponse
+//	@Success		201		{object}	registerResponse
 //	@Failure		400		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/register [post]
@@ -207,7 +213,7 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 			loginType = "email"
 		}
 
-		err := service.Register(c.Request.Context(), pool, conn, cfg, service.RegisterRequest{
+		result, err := service.Register(c.Request.Context(), pool, conn, cfg, service.RegisterRequest{
 			Login:    req.Login,
 			Password: req.Password,
 		})
@@ -233,7 +239,9 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 		}
 
 		c.JSON(http.StatusCreated, gin.H{
-			"message": "Registration successful. Please verify your " + loginType + ".",
+			"message":            "Registration successful. Please verify your " + loginType + ".",
+			"registration_token": result.RegistrationToken,
+			"expires_in":         result.ExpiresIn,
 		})
 	}
 }

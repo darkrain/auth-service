@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
@@ -96,7 +97,11 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/verify/email [post]
-func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
+func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config, cacheClient ...*cache.Client) gin.HandlerFunc {
+	var cc *cache.Client
+	if len(cacheClient) > 0 {
+		cc = cacheClient[0]
+	}
 	return func(c *gin.Context) {
 		var req verifyCodeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -115,7 +120,7 @@ func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			}
 		}
 
-		err := service.VerifyCode(c.Request.Context(), pool, cfg, req.Recipient, req.Code, req.DeviceUID, "email", userID)
+		err := service.VerifyCode(c.Request.Context(), pool, cfg, cc, req.Recipient, req.Code, req.DeviceUID, "email", userID)
 		if err != nil {
 			handleVerifyError(c, err)
 			return
@@ -142,7 +147,11 @@ func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/verify/phone [post]
-func VerifyPhone(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
+func VerifyPhone(pool *pgxpool.Pool, cfg *config.Config, cacheClient ...*cache.Client) gin.HandlerFunc {
+	var cc *cache.Client
+	if len(cacheClient) > 0 {
+		cc = cacheClient[0]
+	}
 	return func(c *gin.Context) {
 		var req verifyCodeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -161,7 +170,7 @@ func VerifyPhone(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			}
 		}
 
-		err := service.VerifyCode(c.Request.Context(), pool, cfg, req.Recipient, req.Code, req.DeviceUID, "phone", userID)
+		err := service.VerifyCode(c.Request.Context(), pool, cfg, cc, req.Recipient, req.Code, req.DeviceUID, "phone", userID)
 		if err != nil {
 			handleVerifyError(c, err)
 			return
