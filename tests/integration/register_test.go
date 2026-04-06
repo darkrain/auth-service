@@ -105,3 +105,63 @@ func TestRegister_EmptyPassword(t *testing.T) {
 		t.Fatalf("expected 400 for empty password, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestRegister_InvalidEmail(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/register", map[string]string{
+		"login":    "notanemail",
+		"password": "Password1",
+	}, "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid email, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if body["error"] == nil {
+		t.Errorf("expected error field in response")
+	}
+}
+
+func TestRegister_InvalidEmailMissingAt(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/register", map[string]string{
+		"login":    "@domain.com",
+		"password": "Password1",
+	}, "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid email @domain.com, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegister_InvalidPhone_NoPlus(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/register", map[string]string{
+		"login":    "89991234567",
+		"password": "Password1",
+	}, "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid phone without +, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if body["error"] == nil {
+		t.Errorf("expected error field in response")
+	}
+}
+
+func TestRegister_InvalidPhone_TooShort(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/register", map[string]string{
+		"login":    "+7",
+		"password": "Password1",
+	}, "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for too short phone, got %d: %s", w.Code, w.Body.String())
+	}
+}

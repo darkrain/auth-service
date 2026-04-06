@@ -151,6 +151,49 @@ func TestVerifyPhone_Success(t *testing.T) {
 	}
 }
 
+func TestSendCode_InvalidEmail(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/send-code", map[string]string{
+		"recipient":  "notanemail",
+		"device_uid": "some-device",
+	}, "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid email in send-code, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if body["error"] == nil {
+		t.Errorf("expected error field in response")
+	}
+}
+
+func TestSendCode_InvalidPhone(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/send-code", map[string]string{
+		"recipient":  "89991234567",
+		"device_uid": "some-device",
+	}, "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid phone in send-code, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSendCode_Garbage(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/send-code", map[string]string{
+		"recipient":  "not-valid!!!",
+		"device_uid": "some-device",
+	}, "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for garbage recipient in send-code, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestVerifyEmail_AfterVerify_CanLogin(t *testing.T) {
 	truncateTables(t)
 
