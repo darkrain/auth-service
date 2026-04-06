@@ -28,6 +28,33 @@ func TestSendCode_Success(t *testing.T) {
 	}
 }
 
+// TestSendCode_WrongRecipient verifies that /auth/send-code returns 403
+// when the recipient does not belong to the authenticated user (HIGH-NEW-1).
+func TestSendCode_WrongRecipient(t *testing.T) {
+	truncateTables(t)
+
+	login := "owner@example.com"
+	password := "Password1"
+	deviceUID := "device-wrong-recipient"
+
+	// Register user with login email
+	registrationToken := registerUser(t, login, password)
+
+	// Try to send code to a different recipient (not the user's email)
+	w := doRequest("POST", "/auth/send-code", map[string]string{
+		"recipient":  "other@example.com",
+		"device_uid": deviceUID,
+	}, registrationToken)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for wrong recipient, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if body["error"] == nil {
+		t.Errorf("expected error field in 403 response")
+	}
+}
+
 // TestSendCode_NoToken verifies that /auth/send-code requires authentication.
 func TestSendCode_NoToken(t *testing.T) {
 	truncateTables(t)

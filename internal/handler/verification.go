@@ -59,7 +59,18 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 			return
 		}
 
-		err := service.SendCode(c.Request.Context(), pool, conn, cfg, req.Recipient, req.DeviceUID)
+		// HIGH-NEW-1: extract authenticated user ID for ownership check
+		var userID int64
+		if uid, exists := c.Get("user_id"); exists {
+			switch v := uid.(type) {
+			case int:
+				userID = int64(v)
+			case int64:
+				userID = v
+			}
+		}
+
+		err := service.SendCode(c.Request.Context(), pool, conn, cfg, req.Recipient, req.DeviceUID, userID)
 		if err != nil {
 			switch {
 			case errors.Is(err, service.ErrInvalidEmail):
@@ -70,6 +81,10 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 				c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
 			case errors.Is(err, service.ErrValidation):
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			case errors.Is(err, service.ErrForbiddenRecipient):
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			case errors.Is(err, service.ErrForbidden):
+				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			default:
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 			}

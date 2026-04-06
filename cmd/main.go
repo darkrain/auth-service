@@ -25,6 +25,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	_ "github.com/darkrain/auth-service/docs"
 	"github.com/darkrain/auth-service/internal/broker"
@@ -58,6 +61,15 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	// MEDIUM-NEW-1: validate critical config fields
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid config: %v", err)
+	}
+
+	// Create a context that cancels on SIGTERM/SIGINT
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	// PostgreSQL
 	var pgPool *pgxpool.Pool
 	rawPool, err := db.Connect(cfg)
@@ -77,6 +89,9 @@ func main() {
 		if err := db.Seed(pgPool, cfg); err != nil {
 			log.Printf("WARNING: seed failed: %v", err)
 		}
+
+		// LOW: background goroutine to clean up expired sessions every 24h
+		db.StartSessionCleanup(ctx, pgPool, log.Default())
 	}
 
 	// Redis
@@ -124,8 +139,10 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
 
-	// Swagger UI
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// LOW: Swagger UI gated by config flag (disabled by default in production)
+	if cfg.SwaggerEnabled {
+		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 
 	r.POST("/auth/register",
 		middleware.RateLimit(cacheClient, rmqConn, "/auth/register",
@@ -138,7 +155,11 @@ func main() {
 			cfg.RateLimit.Device.LoginMaxAttempts, cfg.RateLimit.Device.LoginWindowSec),
 		handler.Login(pgPool, rmqConn, cfg, cacheClient))
 	r.POST("/auth/logout", handler.Logout(pgPool, cacheClient))
-	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pgPool, cfg))
+	r.POST("/auth/login/verify-2fa",
+		middleware.RateLimit(cacheClient, rmqConn, "/auth/login/verify-2fa",
+			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.VerifyLogin2FA(pgPool, cfg))
 
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")

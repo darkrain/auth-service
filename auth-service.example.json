@@ -25,6 +25,8 @@
   "RegistrationTokenTTLMin": 30,
   "TwoFactorEnabled": false,
   "TrustedProxies": ["127.0.0.1"],
+  "PostgreSQLSSLMode": "require",
+  "SwaggerEnabled": false,
   "RateLimit": {
     "IP": {
       "LoginMaxAttempts": 5,
