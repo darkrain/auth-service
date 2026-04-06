@@ -231,7 +231,7 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 				return
 			}
 			if errors.Is(err, service.ErrAlreadyExists) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Login already registered"})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})

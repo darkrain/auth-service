@@ -12,12 +12,12 @@ func TestSendCode_Success(t *testing.T) {
 	password := "Password1"
 	deviceUID := "device-sendcode"
 
-	registerUser(t, login, password)
+	registrationToken := registerUser(t, login, password)
 
 	w := doRequest("POST", "/auth/send-code", map[string]string{
 		"recipient":  login,
 		"device_uid": deviceUID,
-	}, "")
+	}, registrationToken)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -28,13 +28,34 @@ func TestSendCode_Success(t *testing.T) {
 	}
 }
 
+// TestSendCode_NoToken verifies that /auth/send-code requires authentication.
+func TestSendCode_NoToken(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/send-code", map[string]string{
+		"recipient":  "test@example.com",
+		"device_uid": "some-device",
+	}, "")
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for missing token on /auth/send-code, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if body["error"] == nil {
+		t.Errorf("expected error field in 401 response")
+	}
+}
+
 func TestSendCode_EmptyRecipient(t *testing.T) {
 	truncateTables(t)
+
+	// NEW-2: /auth/send-code now requires auth; use system user token to test validation
+	systemToken := loginSystemUser(t)
 
 	w := doRequest("POST", "/auth/send-code", map[string]string{
 		"recipient":  "",
 		"device_uid": "some-device",
-	}, "")
+	}, systemToken)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for empty recipient, got %d: %s", w.Code, w.Body.String())
@@ -48,13 +69,13 @@ func TestVerifyEmail_Success(t *testing.T) {
 	password := "Password1"
 	deviceUID := "device-verify-email"
 
-	registerUser(t, login, password)
+	registrationToken := registerUser(t, login, password)
 
-	// Send code
+	// NEW-2: /auth/send-code now requires auth; use registration token
 	w := doRequest("POST", "/auth/send-code", map[string]string{
 		"recipient":  login,
 		"device_uid": deviceUID,
-	}, "")
+	}, registrationToken)
 	if w.Code != http.StatusOK {
 		t.Fatalf("send-code: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -63,7 +84,7 @@ func TestVerifyEmail_Success(t *testing.T) {
 	code := getConfirmCode(t, login, deviceUID)
 
 	// CRIT-2: verify now requires auth token
-	token := createTempSession(t, login)
+	token := registrationToken
 
 	// Verify
 	w = doRequest("POST", "/auth/verify/email", map[string]string{
@@ -84,19 +105,19 @@ func TestVerifyEmail_WrongCode(t *testing.T) {
 	password := "Password1"
 	deviceUID := "device-wrong-code"
 
-	registerUser(t, login, password)
+	registrationToken := registerUser(t, login, password)
 
-	// Send code
+	// NEW-2: /auth/send-code now requires auth; use registration token
 	w := doRequest("POST", "/auth/send-code", map[string]string{
 		"recipient":  login,
 		"device_uid": deviceUID,
-	}, "")
+	}, registrationToken)
 	if w.Code != http.StatusOK {
 		t.Fatalf("send-code: expected 200, got %d", w.Code)
 	}
 
 	// CRIT-2: verify now requires auth token
-	token := createTempSession(t, login)
+	token := registrationToken
 
 	// Use wrong code
 	w = doRequest("POST", "/auth/verify/email", map[string]string{
@@ -135,13 +156,13 @@ func TestVerifyPhone_Success(t *testing.T) {
 	password := "Password1"
 	deviceUID := "device-verify-phone"
 
-	registerUser(t, login, password)
+	registrationToken := registerUser(t, login, password)
 
-	// Send code
+	// NEW-2: /auth/send-code now requires auth; use registration token
 	w := doRequest("POST", "/auth/send-code", map[string]string{
 		"recipient":  login,
 		"device_uid": deviceUID,
-	}, "")
+	}, registrationToken)
 	if w.Code != http.StatusOK {
 		t.Fatalf("send-code: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -150,7 +171,7 @@ func TestVerifyPhone_Success(t *testing.T) {
 	code := getConfirmCode(t, login, deviceUID)
 
 	// CRIT-2: verify now requires auth token
-	token := createTempSession(t, login)
+	token := registrationToken
 
 	// Verify
 	w = doRequest("POST", "/auth/verify/phone", map[string]string{
@@ -167,10 +188,13 @@ func TestVerifyPhone_Success(t *testing.T) {
 func TestSendCode_InvalidEmail(t *testing.T) {
 	truncateTables(t)
 
+	// NEW-2: /auth/send-code now requires auth; use system user token to test validation
+	systemToken := loginSystemUser(t)
+
 	w := doRequest("POST", "/auth/send-code", map[string]string{
 		"recipient":  "notanemail",
 		"device_uid": "some-device",
-	}, "")
+	}, systemToken)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid email in send-code, got %d: %s", w.Code, w.Body.String())
@@ -184,10 +208,13 @@ func TestSendCode_InvalidEmail(t *testing.T) {
 func TestSendCode_InvalidPhone(t *testing.T) {
 	truncateTables(t)
 
+	// NEW-2: /auth/send-code now requires auth; use system user token to test validation
+	systemToken := loginSystemUser(t)
+
 	w := doRequest("POST", "/auth/send-code", map[string]string{
 		"recipient":  "89991234567",
 		"device_uid": "some-device",
-	}, "")
+	}, systemToken)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid phone in send-code, got %d: %s", w.Code, w.Body.String())
@@ -197,10 +224,13 @@ func TestSendCode_InvalidPhone(t *testing.T) {
 func TestSendCode_Garbage(t *testing.T) {
 	truncateTables(t)
 
+	// NEW-2: /auth/send-code now requires auth; use system user token to test validation
+	systemToken := loginSystemUser(t)
+
 	w := doRequest("POST", "/auth/send-code", map[string]string{
 		"recipient":  "not-valid!!!",
 		"device_uid": "some-device",
-	}, "")
+	}, systemToken)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for garbage recipient in send-code, got %d: %s", w.Code, w.Body.String())

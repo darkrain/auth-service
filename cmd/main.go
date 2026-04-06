@@ -138,16 +138,17 @@ func main() {
 			cfg.RateLimit.Device.LoginMaxAttempts, cfg.RateLimit.Device.LoginWindowSec),
 		handler.Login(pgPool, rmqConn, cfg, cacheClient))
 	r.POST("/auth/logout", handler.Logout(pgPool, cacheClient))
-	r.POST("/auth/send-code",
-		middleware.RateLimit(cacheClient, rmqConn, "/auth/send-code",
-			0, 0,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.SendCode(pgPool, rmqConn, cfg))
 	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pgPool, cfg))
 
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pgPool, cacheClient))
+
+	authRequired.POST("/auth/send-code",
+		middleware.RateLimit(cacheClient, rmqConn, "/auth/send-code",
+			cfg.RateLimit.IP.SendCodeMaxAttempts, cfg.RateLimit.IP.SendCodeWindowSec,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.SendCode(pgPool, rmqConn, cfg))
 
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")
