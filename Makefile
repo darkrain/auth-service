@@ -24,7 +24,7 @@ test:
 	go test ./...
 
 run:
-	go run ./cmd/main.go --config auth-service.example.json
+	go run ./cmd/main.go --config debug.local.json
 
 install: build
 	install -D -m 0755 $(BIN_DIR)/$(BIN_FILE) /usr/bin/$(BIN_FILE)

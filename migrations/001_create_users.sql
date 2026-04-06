@@ -9,8 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     phone           TEXT,
     phone_verified  BOOLEAN NOT NULL DEFAULT FALSE,
     role            TEXT NOT NULL DEFAULT 'user',
-    verify_status   TEXT NOT NULL DEFAULT 'unverified',
-    profile_id      BIGINT
+    verify_status   TEXT NOT NULL DEFAULT 'unverified'
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (email) WHERE email IS NOT NULL;
