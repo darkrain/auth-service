@@ -89,16 +89,18 @@ func TestMain(m *testing.M) {
 			cfg.RateLimit.Device.LoginMaxAttempts, cfg.RateLimit.Device.LoginWindowSec),
 		handler.Login(pool, nil, cfg, testCache))
 	r.POST("/auth/logout", handler.Logout(pool, testCache))
-	r.POST("/auth/send-code",
-		middleware.RateLimit(testCache, nil, "/auth/send-code",
-			0, 0,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.SendCode(pool, nil, cfg))
 	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pool, cfg))
 
 	// Protected routes
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pool, testCache))
+
+	// NEW-2: /auth/send-code moved to authRequired group
+	authRequired.POST("/auth/send-code",
+		middleware.RateLimit(testCache, nil, "/auth/send-code",
+			cfg.RateLimit.IP.SendCodeMaxAttempts, cfg.RateLimit.IP.SendCodeWindowSec,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.SendCode(pool, nil, cfg))
 
 	// CRIT-2 + HIGH-2: verify endpoints require auth and have rate limiting
 	authRequired.POST("/auth/verify/email",
@@ -269,11 +271,19 @@ func createTempSession(t *testing.T, recipient string) string {
 func verifyUser(t *testing.T, recipient, deviceUID string, registrationToken ...string) {
 	t.Helper()
 
-	// Send code
+	// Use registration token if provided, otherwise fall back to temporary session
+	var authToken string
+	if len(registrationToken) > 0 && registrationToken[0] != "" {
+		authToken = registrationToken[0]
+	} else {
+		authToken = createTempSession(t, recipient)
+	}
+
+	// NEW-2: /auth/send-code now requires auth token
 	w := doRequest("POST", "/auth/send-code", map[string]string{
 		"recipient":  recipient,
 		"device_uid": deviceUID,
-	}, "")
+	}, authToken)
 	if w.Code != http.StatusOK {
 		t.Fatalf("verifyUser send-code(%s): expected 200, got %d: %s", recipient, w.Code, w.Body.String())
 	}
@@ -286,19 +296,11 @@ func verifyUser(t *testing.T, recipient, deviceUID string, registrationToken ...
 		endpoint = "/auth/verify/email"
 	}
 
-	// Use registration token if provided, otherwise fall back to temporary session
-	var token string
-	if len(registrationToken) > 0 && registrationToken[0] != "" {
-		token = registrationToken[0]
-	} else {
-		token = createTempSession(t, recipient)
-	}
-
 	w = doRequest("POST", endpoint, map[string]string{
 		"recipient":  recipient,
 		"code":       code,
 		"device_uid": deviceUID,
-	}, token)
+	}, authToken)
 	if w.Code != http.StatusOK {
 		t.Fatalf("verifyUser verify(%s): expected 200, got %d: %s", recipient, w.Code, w.Body.String())
 	}

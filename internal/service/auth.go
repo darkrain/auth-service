@@ -29,7 +29,7 @@ var ErrInvalidEmail = errors.New("invalid email format")
 var ErrInvalidPhone = errors.New("invalid phone format")
 
 // ErrAlreadyExists is returned when email/phone is already taken.
-var ErrAlreadyExists = errors.New("already exists")
+var ErrAlreadyExists = errors.New("login already registered")
 
 // ErrNotFound is returned when the user is not found.
 var ErrNotFound = errors.New("not found")
@@ -355,7 +355,7 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 			return nil, fmt.Errorf("db: uniqueness check: %w", err)
 		}
 		if exists {
-			return nil, fmt.Errorf("%w: %s is already registered", ErrAlreadyExists, req.Login)
+			return nil, ErrAlreadyExists
 		}
 	}
 

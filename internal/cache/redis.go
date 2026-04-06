@@ -71,16 +71,24 @@ func (c *Client) DeleteSession(ctx context.Context, token string) error {
 	return c.rdb.Del(ctx, sessionKey(token)).Err()
 }
 
+// luaIncrExpire atomically increments a key and sets its TTL on first increment.
+// This prevents a race condition where EXPIRE could be lost if the process crashes
+// between INCR and EXPIRE, causing the counter to never expire.
+var luaIncrExpire = redis.NewScript(`
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+end
+return current
+`)
+
 // SlidingWindowIncr increments a sliding window counter in Redis.
-// Uses INCR + EXPIRE pattern: if key is new (count==1), set TTL to windowSec.
+// Uses an atomic Lua script to set TTL on first increment, preventing counter leak.
 // Returns the current count after increment.
 func (c *Client) SlidingWindowIncr(ctx context.Context, key string, windowSec int) (int64, error) {
-	count, err := c.rdb.Incr(ctx, key).Result()
+	count, err := luaIncrExpire.Run(ctx, c.rdb, []string{key}, windowSec).Int64()
 	if err != nil {
 		return 0, err
-	}
-	if count == 1 {
-		_ = c.rdb.Expire(ctx, key, time.Duration(windowSec)*time.Second).Err()
 	}
 	return count, nil
 }

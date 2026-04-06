@@ -30,7 +30,9 @@
       "LoginMaxAttempts": 5,
       "LoginWindowSec": 900,
       "RegisterMaxAttempts": 3,
-      "RegisterWindowSec": 3600
+      "RegisterWindowSec": 3600,
+      "SendCodeMaxAttempts": 10,
+      "SendCodeWindowSec": 60
     },
     "Device": {
       "LoginMaxAttempts": 10,

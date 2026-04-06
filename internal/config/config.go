@@ -11,6 +11,8 @@ type RateLimitIP struct {
 	LoginWindowSec      int `json:"LoginWindowSec"`
 	RegisterMaxAttempts int `json:"RegisterMaxAttempts"`
 	RegisterWindowSec   int `json:"RegisterWindowSec"`
+	SendCodeMaxAttempts int `json:"SendCodeMaxAttempts"`
+	SendCodeWindowSec   int `json:"SendCodeWindowSec"`
 }
 
 type RateLimitDevice struct {
