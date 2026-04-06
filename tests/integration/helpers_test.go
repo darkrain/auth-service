@@ -94,13 +94,23 @@ func TestMain(m *testing.M) {
 			0, 0,
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
 		handler.SendCode(pool, nil, cfg))
-	r.POST("/auth/verify/email", handler.VerifyEmail(pool, cfg))
-	r.POST("/auth/verify/phone", handler.VerifyPhone(pool, cfg))
 	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pool, cfg))
 
 	// Protected routes
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pool, testCache))
+
+	// CRIT-2 + HIGH-2: verify endpoints require auth and have rate limiting
+	authRequired.POST("/auth/verify/email",
+		middleware.RateLimit(testCache, nil, "/auth/verify/email",
+			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.VerifyEmail(pool, cfg))
+	authRequired.POST("/auth/verify/phone",
+		middleware.RateLimit(testCache, nil, "/auth/verify/phone",
+			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.VerifyPhone(pool, cfg))
 
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")
@@ -217,7 +227,40 @@ func getConfirmCode(t *testing.T, recipient, deviceUID string) string {
 	return code
 }
 
+// createTempSession inserts a temporary session for an unverified user and returns the token.
+// Used for testing verify endpoints that now require authentication.
+func createTempSession(t *testing.T, recipient string) string {
+	t.Helper()
+	ctx := context.Background()
+
+	// Find user ID
+	var userID int64
+	var query string
+	if strings.Contains(recipient, "@") {
+		query = `SELECT id FROM users WHERE email=$1 LIMIT 1`
+	} else {
+		query = `SELECT id FROM users WHERE phone=$1 LIMIT 1`
+	}
+	if err := testPool.QueryRow(ctx, query, recipient).Scan(&userID); err != nil {
+		t.Fatalf("createTempSession: user not found for %s: %v", recipient, err)
+	}
+
+	// Insert a temporary session (30 days expiry)
+	token := fmt.Sprintf("test-temp-session-%d", userID)
+	_, err := testPool.Exec(ctx,
+		`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked)
+		 VALUES ($1, $2, NOW() + INTERVAL '30 days', 'password', '127.0.0.1', false)
+		 ON CONFLICT DO NOTHING`,
+		userID, token,
+	)
+	if err != nil {
+		t.Fatalf("createTempSession: insert session: %v", err)
+	}
+	return token
+}
+
 // verifyUser sends a code and verifies the recipient via email or phone endpoint.
+// CRIT-2: verify endpoints now require an auth token.
 func verifyUser(t *testing.T, recipient, deviceUID string) {
 	t.Helper()
 
@@ -238,11 +281,14 @@ func verifyUser(t *testing.T, recipient, deviceUID string) {
 		endpoint = "/auth/verify/email"
 	}
 
+	// Create a temporary session so we can authenticate the verify call
+	token := createTempSession(t, recipient)
+
 	w = doRequest("POST", endpoint, map[string]string{
 		"recipient":  recipient,
 		"code":       code,
 		"device_uid": deviceUID,
-	}, "")
+	}, token)
 	if w.Code != http.StatusOK {
 		t.Fatalf("verifyUser verify(%s): expected 200, got %d: %s", recipient, w.Code, w.Body.String())
 	}

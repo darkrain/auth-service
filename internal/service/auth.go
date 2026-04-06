@@ -207,15 +207,32 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 	isEmail := strings.Contains(req.Login, "@")
 
 	var userID int64
+	var verifyStatus string
 	if pool != nil {
 		var query string
 		if isEmail {
-			query = `SELECT id FROM users WHERE email = $1 LIMIT 1`
+			query = `SELECT id, verify_status FROM users WHERE email = $1 LIMIT 1`
 		} else {
-			query = `SELECT id FROM users WHERE phone = $1 LIMIT 1`
+			query = `SELECT id, verify_status FROM users WHERE phone = $1 LIMIT 1`
 		}
-		if err := pool.QueryRow(ctx, query, req.Login).Scan(&userID); err != nil {
+		if err := pool.QueryRow(ctx, query, req.Login).Scan(&userID, &verifyStatus); err != nil {
 			return nil, fmt.Errorf("%w: user not found", ErrNotFound)
+		}
+	}
+
+	// Check verify_status
+	switch verifyStatus {
+	case "verified":
+		// OK
+	case "registered":
+		return nil, fmt.Errorf("%w: Account not verified. Please verify your email or phone.", ErrForbidden)
+	case "banned":
+		return nil, fmt.Errorf("%w: Account is banned.", ErrForbidden)
+	case "deleted":
+		return nil, fmt.Errorf("%w: Account not found.", ErrForbidden)
+	default:
+		if verifyStatus != "" {
+			return nil, fmt.Errorf("%w: Account access denied.", ErrForbidden)
 		}
 	}
 
@@ -335,9 +352,14 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 		}
 	}
 
+	// 5. Validate password max length
+	if err := validator.ValidatePasswordLength(req.Password); err != nil {
+		return fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	}
+
 	// 5. Hash password: bcrypt(salt + password)
 	saltedPassword := cfg.PasswordSalt + req.Password
-	hash, err := bcrypt.GenerateFromPassword([]byte(saltedPassword), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(saltedPassword), 12)
 	if err != nil {
 		return fmt.Errorf("bcrypt: %w", err)
 	}

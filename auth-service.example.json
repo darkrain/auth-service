@@ -23,6 +23,7 @@
   "RmqExchangeKind": "direct",
   "SessionTTLDays": 30,
   "TwoFactorEnabled": false,
+  "TrustedProxies": ["127.0.0.1"],
   "RateLimit": {
     "IP": {
       "LoginMaxAttempts": 5,

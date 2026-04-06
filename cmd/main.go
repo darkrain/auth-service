@@ -109,6 +109,17 @@ func main() {
 	// HTTP server
 	r := gin.Default()
 
+	// HIGH-4: configure trusted proxies from config
+	if len(cfg.TrustedProxies) > 0 {
+		if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+			log.Printf("WARNING: SetTrustedProxies: %v", err)
+		}
+	} else {
+		if err := r.SetTrustedProxies([]string{"127.0.0.1"}); err != nil {
+			log.Printf("WARNING: SetTrustedProxies: %v", err)
+		}
+	}
+
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
@@ -132,8 +143,6 @@ func main() {
 			0, 0,
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
 		handler.SendCode(pgPool, rmqConn, cfg))
-	r.POST("/auth/verify/email", handler.VerifyEmail(pgPool, cfg))
-	r.POST("/auth/verify/phone", handler.VerifyPhone(pgPool, cfg))
 	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pgPool, cfg))
 
 	// Protected routes (require valid session token)
@@ -146,6 +155,18 @@ func main() {
 	apiKeys.POST("", handler.CreateAPIKey(pgPool))
 	apiKeys.GET("", handler.ListAPIKeys(pgPool))
 	apiKeys.DELETE("/:id", handler.RevokeAPIKey(pgPool, cacheClient))
+
+	// CRIT-2 + HIGH-2: verify endpoints require auth and have rate limiting
+	authRequired.POST("/auth/verify/email",
+		middleware.RateLimit(cacheClient, rmqConn, "/auth/verify/email",
+			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.VerifyEmail(pgPool, cfg))
+	authRequired.POST("/auth/verify/phone",
+		middleware.RateLimit(cacheClient, rmqConn, "/auth/verify/phone",
+			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.VerifyPhone(pgPool, cfg))
 
 	// Authenticated user info
 	authRequired.GET("/auth/me", handler.Me())

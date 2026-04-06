@@ -11,7 +11,7 @@ import (
 
 func Seed(pool *pgxpool.Pool, cfg *config.Config) error {
 	// Hash password (must use same salt prefix as Login service: cfg.PasswordSalt + password)
-	hash, err := bcrypt.GenerateFromPassword([]byte(cfg.PasswordSalt+cfg.SystemUserPassword), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(cfg.PasswordSalt+cfg.SystemUserPassword), 12)
 	if err != nil {
 		return fmt.Errorf("seed: hash password: %w", err)
 	}
