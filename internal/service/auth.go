@@ -306,19 +306,26 @@ type RegisterRequest struct {
 	Password string
 }
 
+// RegisterResult holds the result of a successful registration.
+type RegisterResult struct {
+	RegistrationToken string
+	ExpiresIn         int
+}
+
 // Register validates, hashes password, inserts user and publishes a verification event.
-func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, req RegisterRequest) error {
+// Returns a short-lived registration token the client can use to authenticate verify calls.
+func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, req RegisterRequest) (*RegisterResult, error) {
 	// 1. Basic field validation
 	if strings.TrimSpace(req.Login) == "" {
-		return fmt.Errorf("%w: login (email or phone) is required", ErrValidation)
+		return nil, fmt.Errorf("%w: login (email or phone) is required", ErrValidation)
 	}
 	if strings.TrimSpace(req.Password) == "" {
-		return fmt.Errorf("%w: password is required", ErrValidation)
+		return nil, fmt.Errorf("%w: password is required", ErrValidation)
 	}
 
 	// 2. Password complexity
 	if err := validatePassword(req.Password, cfg); err != nil {
-		return err
+		return nil, err
 	}
 
 	// 3. Determine login type
@@ -327,11 +334,11 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	// 3a. Validate format
 	if isEmail {
 		if !validator.IsValidEmail(req.Login) {
-			return ErrInvalidEmail
+			return nil, ErrInvalidEmail
 		}
 	} else {
 		if !validator.IsValidPhone(req.Login) {
-			return ErrInvalidPhone
+			return nil, ErrInvalidPhone
 		}
 	}
 
@@ -345,23 +352,23 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 			query = `SELECT EXISTS(SELECT 1 FROM users WHERE phone = $1)`
 		}
 		if err := pool.QueryRow(ctx, query, req.Login).Scan(&exists); err != nil {
-			return fmt.Errorf("db: uniqueness check: %w", err)
+			return nil, fmt.Errorf("db: uniqueness check: %w", err)
 		}
 		if exists {
-			return fmt.Errorf("%w: %s is already registered", ErrAlreadyExists, req.Login)
+			return nil, fmt.Errorf("%w: %s is already registered", ErrAlreadyExists, req.Login)
 		}
 	}
 
 	// 5. Validate password max length
 	if err := validator.ValidatePasswordLength(req.Password); err != nil {
-		return fmt.Errorf("%w: %s", ErrValidation, err.Error())
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 
 	// 5. Hash password: bcrypt(salt + password)
 	saltedPassword := cfg.PasswordSalt + req.Password
 	hash, err := bcrypt.GenerateFromPassword([]byte(saltedPassword), 12)
 	if err != nil {
-		return fmt.Errorf("bcrypt: %w", err)
+		return nil, fmt.Errorf("bcrypt: %w", err)
 	}
 
 	// 6. Insert user
@@ -374,11 +381,35 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 			insertQuery = `INSERT INTO users (phone, password, role, verify_status) VALUES ($1, $2, 'user', 'registered') RETURNING id`
 		}
 		if err := pool.QueryRow(ctx, insertQuery, req.Login, string(hash)).Scan(&userID); err != nil {
-			return fmt.Errorf("db: insert user: %w", err)
+			return nil, fmt.Errorf("db: insert user: %w", err)
 		}
 	}
 
-	// 7. Publish verification event to RabbitMQ
+	// 6b. Generate registration token (short-lived session for email/phone verification)
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, fmt.Errorf("token generation: %w", err)
+	}
+	registrationToken := hex.EncodeToString(tokenBytes)
+
+	ttlMin := cfg.RegistrationTokenTTLMin
+	if ttlMin <= 0 {
+		ttlMin = 30
+	}
+	expireDate := time.Now().Add(time.Duration(ttlMin) * time.Minute)
+	expiresIn := ttlMin * 60
+
+	if pool != nil {
+		_, err := pool.Exec(ctx,
+			`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked) VALUES ($1, $2, $3, 'registration', '127.0.0.1', false)`,
+			userID, registrationToken, expireDate,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("db: insert registration session: %w", err)
+		}
+	}
+
+	// 7. Publish verification event to RabbitMQ (best-effort; ignore if broker unavailable)
 	if conn != nil {
 		eventType := "phone_verification"
 		if isEmail {
@@ -397,12 +428,12 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 			UserID:    userID,
 		})
 		if err != nil {
-			return fmt.Errorf("json: marshal event: %w", err)
+			return nil, fmt.Errorf("json: marshal event: %w", err)
 		}
 
 		ch, err := conn.Channel()
 		if err != nil {
-			return fmt.Errorf("broker: open channel: %w", err)
+			return nil, fmt.Errorf("broker: open channel: %w", err)
 		}
 		defer ch.Close()
 
@@ -415,7 +446,7 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 			false, // no-wait
 			nil,
 		); err != nil {
-			return fmt.Errorf("broker: declare exchange: %w", err)
+			return nil, fmt.Errorf("broker: declare exchange: %w", err)
 		}
 
 		if err := ch.PublishWithContext(ctx,
@@ -428,11 +459,14 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 				Body:        payload,
 			},
 		); err != nil {
-			return fmt.Errorf("broker: publish: %w", err)
+			return nil, fmt.Errorf("broker: publish: %w", err)
 		}
 	}
 
-	return nil
+	return &RegisterResult{
+		RegistrationToken: registrationToken,
+		ExpiresIn:         expiresIn,
+	}, nil
 }
 
 // validatePassword checks password complexity against config rules.

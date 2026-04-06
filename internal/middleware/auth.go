@@ -36,11 +36,20 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		// 1. Check Redis cache
 		if cacheClient != nil {
 			if sd, err := cacheClient.GetSession(c.Request.Context(), token); err == nil && sd != nil {
+				// Restrict registration tokens
+				if sd.AuthType == "registration" {
+					path := c.FullPath()
+					if path != "/auth/verify/email" && path != "/auth/verify/phone" && path != "/auth/send-code" {
+						c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification"})
+						return
+					}
+				}
 				c.Set("user_id", sd.UserID)
 				c.Set("email", sd.Email)
 				c.Set("phone", sd.Phone)
 				c.Set("role", sd.Role)
 				c.Set("verify_status", sd.VerifyStatus)
+				c.Set("auth_type", sd.AuthType)
 				c.Set("token", token)
 				c.Next()
 				return
@@ -54,16 +63,16 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		}
 
 		var userID int
-		var email, phone, role, verifyStatus string
+		var email, phone, role, verifyStatus, authType string
 		var blocked bool
 		var expireDate *time.Time
 
 		err := pool.QueryRow(c.Request.Context(), `
-			SELECT s.user_id, COALESCE(u.email,''), COALESCE(u.phone,''), u.role, u.verify_status, s.blocked, s.expire_date
+			SELECT s.user_id, COALESCE(u.email,''), COALESCE(u.phone,''), u.role, u.verify_status, s.blocked, s.expire_date, COALESCE(s.auth_type,'')
 			FROM sessions s
 			JOIN users u ON u.id = s.user_id
 			WHERE s.token = $1
-		`, token).Scan(&userID, &email, &phone, &role, &verifyStatus, &blocked, &expireDate)
+		`, token).Scan(&userID, &email, &phone, &role, &verifyStatus, &blocked, &expireDate, &authType)
 
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
@@ -80,6 +89,15 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 			return
 		}
 
+		// Restrict registration tokens to verification endpoints only
+		if authType == "registration" {
+			path := c.FullPath()
+			if path != "/auth/verify/email" && path != "/auth/verify/phone" && path != "/auth/send-code" {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification"})
+				return
+			}
+		}
+
 		// 3. Store in Redis cache with TTL = expire_date - now
 		if cacheClient != nil {
 			sd := &cache.SessionData{
@@ -88,6 +106,7 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 				Phone:        phone,
 				Role:         role,
 				VerifyStatus: verifyStatus,
+				AuthType:     authType,
 			}
 			var ttl time.Duration
 			if expireDate != nil {
@@ -110,6 +129,7 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		c.Set("phone", phone)
 		c.Set("role", role)
 		c.Set("verify_status", verifyStatus)
+		c.Set("auth_type", authType)
 		c.Set("token", token)
 
 		c.Next()

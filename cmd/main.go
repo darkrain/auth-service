@@ -161,12 +161,12 @@ func main() {
 		middleware.RateLimit(cacheClient, rmqConn, "/auth/verify/email",
 			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyEmail(pgPool, cfg))
+		handler.VerifyEmail(pgPool, cfg, cacheClient))
 	authRequired.POST("/auth/verify/phone",
 		middleware.RateLimit(cacheClient, rmqConn, "/auth/verify/phone",
 			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyPhone(pgPool, cfg))
+		handler.VerifyPhone(pgPool, cfg, cacheClient))
 
 	// Authenticated user info
 	authRequired.GET("/auth/me", handler.Me())

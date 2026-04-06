@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/validator"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -160,7 +161,8 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 // VerifyCode checks a verification code for the given recipient+deviceUID.
 // verifyType must be "email" or "phone".
 // userID is the authenticated user's ID; the recipient must match their email/phone.
-func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, recipient, code, deviceUID, verifyType string, userID int64) error {
+// cacheClient is optional; used to purge registration session tokens from Redis.
+func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cacheClient *cache.Client, recipient, code, deviceUID, verifyType string, userID int64) error {
 	recipient = strings.TrimSpace(recipient)
 	code = strings.TrimSpace(code)
 
@@ -254,6 +256,30 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, rec
 	)
 	if err != nil {
 		return fmt.Errorf("db: delete confirm_codes: %w", err)
+	}
+
+	// Invalidate all registration tokens for this user
+	if userID > 0 {
+		// Fetch registration session tokens before blocking them (for cache invalidation)
+		if cacheClient != nil {
+			rows, qErr := pool.Query(ctx,
+				`SELECT token FROM sessions WHERE user_id=$1 AND auth_type='registration' AND blocked=false`,
+				userID,
+			)
+			if qErr == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var t string
+					if rows.Scan(&t) == nil {
+						_ = cacheClient.DeleteSession(ctx, t)
+					}
+				}
+			}
+		}
+		_, _ = pool.Exec(ctx,
+			`UPDATE sessions SET blocked=true WHERE user_id=$1 AND auth_type='registration'`,
+			userID,
+		)
 	}
 
 	return nil

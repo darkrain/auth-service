@@ -105,12 +105,12 @@ func TestMain(m *testing.M) {
 		middleware.RateLimit(testCache, nil, "/auth/verify/email",
 			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyEmail(pool, cfg))
+		handler.VerifyEmail(pool, cfg, testCache))
 	authRequired.POST("/auth/verify/phone",
 		middleware.RateLimit(testCache, nil, "/auth/verify/phone",
 			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyPhone(pool, cfg))
+		handler.VerifyPhone(pool, cfg, testCache))
 
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")
@@ -201,7 +201,8 @@ func parseJSON(w *httptest.ResponseRecorder) map[string]interface{} {
 }
 
 // registerUser registers a user via POST /auth/register. Fails test on non-201.
-func registerUser(t *testing.T, login, password string) {
+// Returns the registration_token from the response for use in verify calls.
+func registerUser(t *testing.T, login, password string) string {
 	t.Helper()
 	w := doRequest("POST", "/auth/register", map[string]string{
 		"login":    login,
@@ -210,6 +211,9 @@ func registerUser(t *testing.T, login, password string) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("registerUser(%s): expected 201, got %d: %s", login, w.Code, w.Body.String())
 	}
+	body := parseJSON(w)
+	token, _ := body["registration_token"].(string)
+	return token
 }
 
 // getConfirmCode reads the verification code directly from DB for the given recipient+device.
@@ -260,8 +264,9 @@ func createTempSession(t *testing.T, recipient string) string {
 }
 
 // verifyUser sends a code and verifies the recipient via email or phone endpoint.
-// CRIT-2: verify endpoints now require an auth token.
-func verifyUser(t *testing.T, recipient, deviceUID string) {
+// Uses the registration_token returned by registerUser for authentication.
+// token is the registration_token from registerUser(); if empty, falls back to createTempSession.
+func verifyUser(t *testing.T, recipient, deviceUID string, registrationToken ...string) {
 	t.Helper()
 
 	// Send code
@@ -281,8 +286,13 @@ func verifyUser(t *testing.T, recipient, deviceUID string) {
 		endpoint = "/auth/verify/email"
 	}
 
-	// Create a temporary session so we can authenticate the verify call
-	token := createTempSession(t, recipient)
+	// Use registration token if provided, otherwise fall back to temporary session
+	var token string
+	if len(registrationToken) > 0 && registrationToken[0] != "" {
+		token = registrationToken[0]
+	} else {
+		token = createTempSession(t, recipient)
+	}
 
 	w = doRequest("POST", endpoint, map[string]string{
 		"recipient":  recipient,
