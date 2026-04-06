@@ -62,12 +62,15 @@ func TestVerifyEmail_Success(t *testing.T) {
 	// Get code from DB
 	code := getConfirmCode(t, login, deviceUID)
 
+	// CRIT-2: verify now requires auth token
+	token := createTempSession(t, login)
+
 	// Verify
 	w = doRequest("POST", "/auth/verify/email", map[string]string{
 		"recipient":  login,
 		"code":       code,
 		"device_uid": deviceUID,
-	}, "")
+	}, token)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -92,12 +95,15 @@ func TestVerifyEmail_WrongCode(t *testing.T) {
 		t.Fatalf("send-code: expected 200, got %d", w.Code)
 	}
 
+	// CRIT-2: verify now requires auth token
+	token := createTempSession(t, login)
+
 	// Use wrong code
 	w = doRequest("POST", "/auth/verify/email", map[string]string{
 		"recipient":  login,
 		"code":       "000000",
 		"device_uid": deviceUID,
-	}, "")
+	}, token)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for wrong code, got %d: %s", w.Code, w.Body.String())
@@ -107,11 +113,15 @@ func TestVerifyEmail_WrongCode(t *testing.T) {
 func TestVerifyEmail_CodeNotFound(t *testing.T) {
 	truncateTables(t)
 
+	// CRIT-2: verify now requires auth token; use the system user token for this test
+	// (testing that a code-not-found error is returned, not auth failure)
+	systemToken := loginSystemUser(t)
+
 	w := doRequest("POST", "/auth/verify/email", map[string]string{
-		"recipient":  "nocode@example.com",
+		"recipient":  testCfg.SystemUserEmail,
 		"code":       "123456",
 		"device_uid": "no-device",
-	}, "")
+	}, systemToken)
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing code, got %d: %s", w.Code, w.Body.String())
@@ -139,12 +149,15 @@ func TestVerifyPhone_Success(t *testing.T) {
 	// Get code from DB
 	code := getConfirmCode(t, login, deviceUID)
 
+	// CRIT-2: verify now requires auth token
+	token := createTempSession(t, login)
+
 	// Verify
 	w = doRequest("POST", "/auth/verify/phone", map[string]string{
 		"recipient":  login,
 		"code":       code,
 		"device_uid": deviceUID,
-	}, "")
+	}, token)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())

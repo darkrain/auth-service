@@ -65,6 +65,7 @@ type Config struct {
 	RateLimit             RateLimit `json:"RateLimit"`
 	SessionTTLDays        int       `json:"SessionTTLDays"`
 	TwoFactorEnabled      bool      `json:"TwoFactorEnabled"`
+	TrustedProxies        []string  `json:"TrustedProxies"`
 }
 
 func Load(path string) (*Config, error) {

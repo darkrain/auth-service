@@ -82,13 +82,16 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 // VerifyEmail handles POST /auth/verify/email
 //
 //	@Summary		Verify email address
-//	@Description	Verifies a user's email address using a code sent to them.
+//	@Description	Verifies a user's email address using a code sent to them. Requires Bearer token.
 //	@Tags			verification
 //	@Accept			json
 //	@Produce		json
+//	@Security		BearerAuth
 //	@Param			request	body		verifyCodeRequest	true	"Email, code and device UID"
 //	@Success		200		{object}	messageResponse
 //	@Failure		400		{object}	errorResponse
+//	@Failure		401		{object}	errorResponse
+//	@Failure		403		{object}	errorResponse
 //	@Failure		404		{object}	errorResponse
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
@@ -101,7 +104,18 @@ func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		err := service.VerifyCode(c.Request.Context(), pool, cfg, req.Recipient, req.Code, req.DeviceUID, "email")
+		// Get authenticated user ID from context (set by Auth middleware)
+		var userID int64
+		if uid, exists := c.Get("user_id"); exists {
+			switch v := uid.(type) {
+			case int:
+				userID = int64(v)
+			case int64:
+				userID = v
+			}
+		}
+
+		err := service.VerifyCode(c.Request.Context(), pool, cfg, req.Recipient, req.Code, req.DeviceUID, "email", userID)
 		if err != nil {
 			handleVerifyError(c, err)
 			return
@@ -114,13 +128,16 @@ func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 // VerifyPhone handles POST /auth/verify/phone
 //
 //	@Summary		Verify phone number
-//	@Description	Verifies a user's phone number using a code sent to them.
+//	@Description	Verifies a user's phone number using a code sent to them. Requires Bearer token.
 //	@Tags			verification
 //	@Accept			json
 //	@Produce		json
+//	@Security		BearerAuth
 //	@Param			request	body		verifyCodeRequest	true	"Phone, code and device UID"
 //	@Success		200		{object}	messageResponse
 //	@Failure		400		{object}	errorResponse
+//	@Failure		401		{object}	errorResponse
+//	@Failure		403		{object}	errorResponse
 //	@Failure		404		{object}	errorResponse
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
@@ -133,7 +150,18 @@ func VerifyPhone(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		err := service.VerifyCode(c.Request.Context(), pool, cfg, req.Recipient, req.Code, req.DeviceUID, "phone")
+		// Get authenticated user ID from context (set by Auth middleware)
+		var userID int64
+		if uid, exists := c.Get("user_id"); exists {
+			switch v := uid.(type) {
+			case int:
+				userID = int64(v)
+			case int64:
+				userID = v
+			}
+		}
+
+		err := service.VerifyCode(c.Request.Context(), pool, cfg, req.Recipient, req.Code, req.DeviceUID, "phone", userID)
 		if err != nil {
 			handleVerifyError(c, err)
 			return
@@ -199,6 +227,8 @@ func handleVerifyError(c *gin.Context, err error) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrValidation):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"error": strings.TrimPrefix(err.Error(), "forbidden: ")})
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrUnauthorized):

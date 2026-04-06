@@ -32,7 +32,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 
 	isEmail := strings.Contains(recipient, "@")
 
-	// Validate format
+	// Validate format (IsValidEmail/IsValidPhone also enforce max length)
 	if isEmail {
 		if !validator.IsValidEmail(recipient) {
 			return ErrInvalidEmail
@@ -159,7 +159,8 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 
 // VerifyCode checks a verification code for the given recipient+deviceUID.
 // verifyType must be "email" or "phone".
-func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, recipient, code, deviceUID, verifyType string) error {
+// userID is the authenticated user's ID; the recipient must match their email/phone.
+func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, recipient, code, deviceUID, verifyType string, userID int64) error {
 	recipient = strings.TrimSpace(recipient)
 	code = strings.TrimSpace(code)
 
@@ -176,6 +177,23 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, rec
 	} else {
 		if !validator.IsValidPhone(recipient) {
 			return ErrInvalidPhone
+		}
+	}
+
+	// Verify that the recipient belongs to the authenticated user (CRIT-2)
+	if userID > 0 {
+		var dbValue string
+		var ownerQuery string
+		if isEmail {
+			ownerQuery = `SELECT COALESCE(email,'') FROM users WHERE id=$1 LIMIT 1`
+		} else {
+			ownerQuery = `SELECT COALESCE(phone,'') FROM users WHERE id=$1 LIMIT 1`
+		}
+		if err := pool.QueryRow(ctx, ownerQuery, userID).Scan(&dbValue); err != nil {
+			return fmt.Errorf("%w: user not found", ErrNotFound)
+		}
+		if dbValue != recipient {
+			return fmt.Errorf("%w: recipient does not match authenticated user", ErrForbidden)
 		}
 	}
 
