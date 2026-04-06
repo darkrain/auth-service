@@ -4,7 +4,7 @@ BIN_DIR  := bin
 BIN_FILE := auth-service
 PKG      := github.com/darkrain/auth-service
 
-VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "dev")
 BUILD    := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 LDFLAGS  := -ldflags "-X main.Version=$(VERSION) -X main.Build=$(BUILD) -X main.ProjectName=$(BIN_FILE)"
