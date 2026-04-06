@@ -16,6 +16,7 @@ func Connect(cfg *config.Config) (*amqp.Connection, error) {
 
 	conn, err := amqp.Dial(url)
 	if err != nil {
+		// LOW: redact password from URL before logging — only log host
 		return nil, fmt.Errorf("broker: dial %s: %w", cfg.RmqHost, err)
 	}
 

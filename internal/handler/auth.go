@@ -83,8 +83,8 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheC
 		if err != nil {
 			switch {
 			case errors.Is(err, service.Err2FA):
-				// Send code and return 202
-				_ = service.SendCode(c.Request.Context(), pool, conn, cfg, req.Login, req.DeviceUID)
+				// Send code and return 202 (userID=0 — not yet authenticated, skip ownership check)
+				_ = service.SendCode(c.Request.Context(), pool, conn, cfg, req.Login, req.DeviceUID, 0)
 				c.JSON(http.StatusAccepted, gin.H{
 					"message":      "Code sent to your email/phone. Please verify.",
 					"requires_2fa": true,

@@ -113,16 +113,13 @@ func (c *Client) LockAccount(ctx context.Context, userID int, durationSec int) e
 
 // IncrFailedLogin increments the failed login counter for a user.
 // If the counter reaches maxAttempts, the account is locked for lockDurationSec seconds.
+// Uses an atomic Lua script to set TTL on first increment, preventing counter leak.
 // Key: "failedlogin:{userID}"
 func (c *Client) IncrFailedLogin(ctx context.Context, userID int, maxAttempts int, lockDurationSec int) error {
 	key := fmt.Sprintf("failedlogin:%d", userID)
-	count, err := c.rdb.Incr(ctx, key).Result()
+	count, err := luaIncrExpire.Run(ctx, c.rdb, []string{key}, lockDurationSec).Int64()
 	if err != nil {
 		return err
-	}
-	// Set TTL on first increment to auto-expire the counter
-	if count == 1 {
-		_ = c.rdb.Expire(ctx, key, time.Duration(lockDurationSec)*time.Second).Err()
 	}
 	if maxAttempts > 0 && count >= int64(maxAttempts) {
 		if lockErr := c.LockAccount(ctx, userID, lockDurationSec); lockErr != nil {

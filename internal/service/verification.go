@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,9 +24,13 @@ var ErrTooManyRequests = errors.New("too many requests")
 // Err2FA is returned when 2FA is required after successful password check.
 var Err2FA = errors.New("2fa required")
 
+// ErrForbiddenRecipient is returned when the recipient does not belong to the authenticated user.
+var ErrForbiddenRecipient = errors.New("recipient does not belong to authenticated user")
+
 // SendCode generates a 6-digit verification code and publishes it to RabbitMQ.
 // Rate-limited: if an existing code's TTL hasn't expired, returns ErrTooManyRequests.
-func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, recipient, deviceUID string) error {
+// userID is the authenticated user's ID; recipient must match their email or phone.
+func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, recipient, deviceUID string, userID int64) error {
 	recipient = strings.TrimSpace(recipient)
 	if recipient == "" {
 		return fmt.Errorf("%w: recipient is required", ErrValidation)
@@ -44,8 +49,26 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 		}
 	}
 
-	// Find user_id by recipient
-	var userID int64
+	// HIGH-NEW-1: verify that the recipient belongs to the authenticated user
+	if pool != nil && userID > 0 {
+		var dbEmail, dbPhone sql.NullString
+		err := pool.QueryRow(ctx, "SELECT email, phone FROM users WHERE id=$1", userID).Scan(&dbEmail, &dbPhone)
+		if err != nil {
+			return ErrForbidden
+		}
+		if isEmail {
+			if !dbEmail.Valid || dbEmail.String != recipient {
+				return ErrForbiddenRecipient
+			}
+		} else {
+			if !dbPhone.Valid || dbPhone.String != recipient {
+				return ErrForbiddenRecipient
+			}
+		}
+	}
+
+	// Find user_id by recipient (for RabbitMQ event payload)
+	var recipientUserID int64
 	if pool != nil {
 		var query string
 		if isEmail {
@@ -53,9 +76,9 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 		} else {
 			query = `SELECT id FROM users WHERE phone = $1 LIMIT 1`
 		}
-		if err := pool.QueryRow(ctx, query, recipient).Scan(&userID); err != nil {
+		if err := pool.QueryRow(ctx, query, recipient).Scan(&recipientUserID); err != nil {
 			// user not found — still proceed (don't leak existence)
-			userID = 0
+			recipientUserID = 0
 		}
 	}
 
@@ -117,7 +140,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 			Type:      eventType,
 			Recipient: recipient,
 			Code:      code,
-			UserID:    userID,
+			UserID:    recipientUserID,
 		})
 		if err != nil {
 			return fmt.Errorf("json: marshal event: %w", err)
