@@ -25,6 +25,7 @@
   "RegistrationTokenTTLMin": 30,
   "TwoFactorEnabled": false,
   "TrustedProxies": ["127.0.0.1"],
+  "AllowedOrigins": ["https://app.example.com"],
   "PostgreSQLSSLMode": "require",
   "SwaggerEnabled": false,
   "TestAccounts": [],

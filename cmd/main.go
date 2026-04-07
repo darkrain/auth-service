@@ -135,6 +135,31 @@ func main() {
 		}
 	}
 
+	// CORS middleware
+	if len(cfg.AllowedOrigins) > 0 {
+		r.Use(func(c *gin.Context) {
+			origin := c.Request.Header.Get("Origin")
+			allowed := false
+			for _, o := range cfg.AllowedOrigins {
+				if o == "*" || o == origin {
+					allowed = true
+					break
+				}
+			}
+			if allowed {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+				c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				c.Header("Access-Control-Max-Age", "86400")
+			}
+			if c.Request.Method == http.MethodOptions {
+				c.AbortWithStatus(http.StatusNoContent)
+				return
+			}
+			c.Next()
+		})
+	}
+
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
