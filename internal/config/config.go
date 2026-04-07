@@ -76,6 +76,7 @@ type Config struct {
 	RegistrationTokenTTLMin  int       `json:"RegistrationTokenTTLMin"`
 	TwoFactorEnabled         bool      `json:"TwoFactorEnabled"`
 	TrustedProxies           []string  `json:"TrustedProxies"`
+	AllowedOrigins           []string  `json:"AllowedOrigins"`
 	PostgreSQLSSLMode         string    `json:"PostgreSQLSSLMode"`
 	SwaggerEnabled            bool      `json:"SwaggerEnabled"`
 	TestAccounts              []TestAccount `json:"TestAccounts"`
