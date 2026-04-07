@@ -32,6 +32,7 @@ type login2FAResponse struct {
 type registerRequest struct {
 	Login    string `json:"login" example:"user@example.com"`
 	Password string `json:"password" example:"Secret123!"`
+	Role     string `json:"role" example:"model"`
 }
 
 type messageResponse struct {
@@ -165,7 +166,6 @@ type meResponse struct {
 	ID           int    `json:"id" example:"1"`
 	Email        string `json:"email" example:"user@example.com"`
 	Phone        string `json:"phone" example:"+79001234567"`
-	Role         string `json:"role" example:"user"`
 	VerifyStatus string `json:"verify_status" example:"verified"`
 }
 
@@ -229,6 +229,7 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 		result, err := service.Register(c.Request.Context(), pool, conn, cfg, service.RegisterRequest{
 			Login:    req.Login,
 			Password: req.Password,
+			Role:     req.Role,
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidEmail) {
@@ -239,8 +240,19 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 				c.JSON(http.StatusBadRequest, errResp(CodeInvalidPhone, "Invalid phone format. Use international format: +79991234567"))
 				return
 			}
+			// ErrForbidden check must come before ErrValidation since reserved role returns ErrForbidden
+			if errors.Is(err, service.ErrForbidden) {
+				msg := strings.TrimPrefix(err.Error(), "forbidden: ")
+				c.JSON(http.StatusForbidden, errResp(CodeRoleReserved, msg))
+				return
+			}
 			if errors.Is(err, service.ErrValidation) {
-				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
+				msg := err.Error()
+				if strings.Contains(msg, "invalid role") {
+					c.JSON(http.StatusBadRequest, errResp(CodeRoleInvalid, msg))
+					return
+				}
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, msg))
 				return
 			}
 			if errors.Is(err, service.ErrAlreadyExists) {

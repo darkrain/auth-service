@@ -80,6 +80,7 @@ type Config struct {
 	PostgreSQLSSLMode         string    `json:"PostgreSQLSSLMode"`
 	SwaggerEnabled            bool      `json:"SwaggerEnabled"`
 	TestAccounts              []TestAccount `json:"TestAccounts"`
+	AllowedRoles              []string      `json:"AllowedRoles"`
 }
 
 func Load(path string) (*Config, error) {
@@ -134,5 +135,24 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("config: TestAccounts[%d].code must not be empty", i)
 		}
 	}
+	for _, role := range c.AllowedRoles {
+		if role == "admin" || role == "system" {
+			return fmt.Errorf("config: AllowedRoles must not contain reserved role %q", role)
+		}
+	}
 	return nil
+}
+
+// IsValidRole returns true if the given role is a built-in reserved role (admin, system)
+// or is listed in AllowedRoles.
+func (c *Config) IsValidRole(role string) bool {
+	if role == "admin" || role == "system" {
+		return true
+	}
+	for _, r := range c.AllowedRoles {
+		if r == role {
+			return true
+		}
+	}
+	return false
 }

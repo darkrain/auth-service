@@ -29,6 +29,7 @@
   "PostgreSQLSSLMode": "require",
   "SwaggerEnabled": false,
   "TestAccounts": [],
+  "AllowedRoles": ["model", "manager", "agency"],
   "RateLimit": {
     "IP": {
       "LoginMaxAttempts": 5,
