@@ -304,6 +304,7 @@ func Logout(ctx context.Context, pool *pgxpool.Pool, cacheClient *cache.Client, 
 type RegisterRequest struct {
 	Login    string
 	Password string
+	Role     string
 }
 
 // RegisterResult holds the result of a successful registration.
@@ -321,6 +322,23 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	}
 	if strings.TrimSpace(req.Password) == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrValidation)
+	}
+
+	// 1b. Resolve role
+	role := strings.TrimSpace(req.Role)
+	if role == "" {
+		if len(cfg.AllowedRoles) > 0 {
+			role = cfg.AllowedRoles[0]
+		} else {
+			role = "user"
+		}
+	} else {
+		if role == "admin" || role == "system" {
+			return nil, fmt.Errorf("%w: cannot register with reserved role", ErrForbidden)
+		}
+		if !cfg.IsValidRole(role) {
+			return nil, fmt.Errorf("%w: invalid role", ErrValidation)
+		}
 	}
 
 	// 2. Password complexity
@@ -376,11 +394,11 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	if pool != nil {
 		var insertQuery string
 		if isEmail {
-			insertQuery = `INSERT INTO users (email, password, role, verify_status) VALUES ($1, $2, 'user', 'registered') RETURNING id`
+			insertQuery = `INSERT INTO users (email, password, role, verify_status) VALUES ($1, $2, $3, 'registered') RETURNING id`
 		} else {
-			insertQuery = `INSERT INTO users (phone, password, role, verify_status) VALUES ($1, $2, 'user', 'registered') RETURNING id`
+			insertQuery = `INSERT INTO users (phone, password, role, verify_status) VALUES ($1, $2, $3, 'registered') RETURNING id`
 		}
-		if err := pool.QueryRow(ctx, insertQuery, req.Login, string(hash)).Scan(&userID); err != nil {
+		if err := pool.QueryRow(ctx, insertQuery, req.Login, string(hash), role).Scan(&userID); err != nil {
 			return nil, fmt.Errorf("db: insert user: %w", err)
 		}
 	}

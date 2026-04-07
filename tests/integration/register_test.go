@@ -165,3 +165,66 @@ func TestRegister_InvalidPhone_TooShort(t *testing.T) {
 		t.Fatalf("expected 400 for too short phone, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestRegister_WithRole_Model(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/register", map[string]interface{}{
+		"login":    "rolemodel@example.com",
+		"password": "Password1",
+		"role":     "model",
+	}, "")
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for role=model, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegister_WithRole_Admin_Forbidden(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/register", map[string]interface{}{
+		"login":    "adminrole@example.com",
+		"password": "Password1",
+		"role":     "admin",
+	}, "")
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for role=admin, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if code, ok := body["code"].(string); !ok || code != "ERR_ROLE_RESERVED" {
+		t.Errorf("expected code ERR_ROLE_RESERVED, got: %s", w.Body.String())
+	}
+}
+
+func TestRegister_WithRole_Unknown_Invalid(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/register", map[string]interface{}{
+		"login":    "unknownrole@example.com",
+		"password": "Password1",
+		"role":     "unknown_role",
+	}, "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for role=unknown_role, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if code, ok := body["code"].(string); !ok || code != "ERR_ROLE_INVALID" {
+		t.Errorf("expected code ERR_ROLE_INVALID, got: %s", w.Body.String())
+	}
+}
+
+func TestRegister_NoRole_DefaultsToFirstAllowedRole(t *testing.T) {
+	truncateTables(t)
+
+	w := doRequest("POST", "/auth/register", map[string]string{
+		"login":    "norole@example.com",
+		"password": "Password1",
+	}, "")
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for empty role (default), got %d: %s", w.Code, w.Body.String())
+	}
+}
