@@ -13,6 +13,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+const codeTooManyRequests = "ERR_TOO_MANY_REQUESTS"
+
 // RateLimit returns a Gin middleware that applies sliding window rate limiting
 // by IP and optionally by device_uid (X-Device-ID header).
 //
@@ -51,7 +53,7 @@ func RateLimit(cacheClient *cache.Client, conn *amqp.Connection, endpoint string
 					"count":    count,
 					"ts":       time.Now().Unix(),
 				})
-				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests. Try again later."})
+				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests. Try again later.", "code": codeTooManyRequests})
 				return
 			}
 		}
@@ -69,7 +71,7 @@ func RateLimit(cacheClient *cache.Client, conn *amqp.Connection, endpoint string
 					"count":     count,
 					"ts":        time.Now().Unix(),
 				})
-				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests. Try again later."})
+				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests. Try again later.", "code": codeTooManyRequests})
 				return
 			}
 		}

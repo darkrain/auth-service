@@ -47,7 +47,7 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 	return func(c *gin.Context) {
 		var req sendCodeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "invalid request body"))
 			return
 		}
 
@@ -55,7 +55,7 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 		req.DeviceUID = strings.TrimSpace(req.DeviceUID)
 
 		if req.Recipient == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "recipient is required"})
+			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "recipient is required"))
 			return
 		}
 
@@ -74,19 +74,19 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 		if err != nil {
 			switch {
 			case errors.Is(err, service.ErrInvalidEmail):
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidEmail, "Invalid email format"))
 			case errors.Is(err, service.ErrInvalidPhone):
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid phone format. Use international format: +79991234567"})
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidPhone, "Invalid phone format. Use international format: +79991234567"))
 			case errors.Is(err, service.ErrTooManyRequests):
-				c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
+				c.JSON(http.StatusTooManyRequests, errResp(CodeTooManyRequests, err.Error()))
 			case errors.Is(err, service.ErrValidation):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
 			case errors.Is(err, service.ErrForbiddenRecipient):
-				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				c.JSON(http.StatusForbidden, errResp(CodeRecipientMismatch, err.Error()))
 			case errors.Is(err, service.ErrForbidden):
-				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+				c.JSON(http.StatusForbidden, errResp(CodeForbidden, "forbidden"))
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+				c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))
 			}
 			return
 		}
@@ -120,7 +120,7 @@ func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config, cacheClient ...*cache.C
 	return func(c *gin.Context) {
 		var req verifyCodeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "invalid request body"))
 			return
 		}
 
@@ -170,7 +170,7 @@ func VerifyPhone(pool *pgxpool.Pool, cfg *config.Config, cacheClient ...*cache.C
 	return func(c *gin.Context) {
 		var req verifyCodeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "invalid request body"))
 			return
 		}
 
@@ -213,7 +213,7 @@ func VerifyLogin2FA(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req verifyLogin2FARequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "invalid request body"))
 			return
 		}
 
@@ -244,20 +244,20 @@ func VerifyLogin2FA(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 func handleVerifyError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidEmail):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+		c.JSON(http.StatusBadRequest, errResp(CodeInvalidEmail, "Invalid email format"))
 	case errors.Is(err, service.ErrInvalidPhone):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid phone format. Use international format: +79991234567"})
+		c.JSON(http.StatusBadRequest, errResp(CodeInvalidPhone, "Invalid phone format. Use international format: +79991234567"))
 	case errors.Is(err, service.ErrTooManyRequests):
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
+		c.JSON(http.StatusTooManyRequests, errResp(CodeTooManyRequests, err.Error()))
 	case errors.Is(err, service.ErrValidation):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": strings.TrimPrefix(err.Error(), "forbidden: ")})
+		c.JSON(http.StatusForbidden, errResp(CodeForbidden, strings.TrimPrefix(err.Error(), "forbidden: ")))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, errResp(CodeCodeNotFound, err.Error()))
 	case errors.Is(err, service.ErrUnauthorized):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid verification code"})
+		c.JSON(http.StatusBadRequest, errResp(CodeCodeInvalid, "invalid verification code"))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))
 	}
 }
