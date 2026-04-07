@@ -122,5 +122,16 @@ func (c *Config) Validate() error {
 	if c.RateLimit.Account.MaxFailedLogins == 0 {
 		log.Printf("WARNING: config: RateLimit.Account.MaxFailedLogins is 0 (account lockout disabled)")
 	}
+	if len(c.TestAccounts) > 0 {
+		log.Printf("WARNING: TestAccounts is non-empty (%d accounts configured) — ensure this is not a production deployment", len(c.TestAccounts))
+	}
+	for i, ta := range c.TestAccounts {
+		if ta.Login == "" {
+			return fmt.Errorf("config: TestAccounts[%d].login must not be empty", i)
+		}
+		if ta.Code == "" {
+			return fmt.Errorf("config: TestAccounts[%d].code must not be empty", i)
+		}
+	}
 	return nil
 }

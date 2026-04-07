@@ -102,7 +102,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	// Check if this is a test account
 	testCode := ""
 	for _, ta := range cfg.TestAccounts {
-		if ta.Login == recipient {
+		if strings.EqualFold(ta.Login, recipient) {
 			testCode = ta.Code
 			break
 		}
