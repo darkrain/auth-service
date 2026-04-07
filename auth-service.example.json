@@ -27,6 +27,7 @@
   "TrustedProxies": ["127.0.0.1"],
   "PostgreSQLSSLMode": "require",
   "SwaggerEnabled": false,
+  "TestAccounts": [],
   "RateLimit": {
     "IP": {
       "LoginMaxAttempts": 5,

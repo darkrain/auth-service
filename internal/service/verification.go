@@ -99,27 +99,46 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 		// err != nil means no row → first time, fine
 	}
 
-	// Generate 6-digit code
-	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
-	if err != nil {
-		return fmt.Errorf("crypto/rand: %w", err)
+	// Check if this is a test account
+	testCode := ""
+	for _, ta := range cfg.TestAccounts {
+		if ta.Login == recipient {
+			testCode = ta.Code
+			break
+		}
 	}
-	code := fmt.Sprintf("%06d", n.Int64())
+
+	// Generate 6-digit code (or use fixed test code)
+	var code string
+	if testCode != "" {
+		code = testCode
+	} else {
+		n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+		if err != nil {
+			return fmt.Errorf("crypto/rand: %w", err)
+		}
+		code = fmt.Sprintf("%06d", n.Int64())
+	}
 
 	now := time.Now()
 
 	// UPSERT into confirm_codes
 	if pool != nil {
-		_, err = pool.Exec(ctx,
+		_, upsertErr := pool.Exec(ctx,
 			`INSERT INTO confirm_codes (device_uid, recipient, code, counter, sent_ts)
 			 VALUES ($1, $2, $3, 0, $4)
 			 ON CONFLICT (device_uid, recipient) DO UPDATE
 			 SET code = EXCLUDED.code, counter = 0, sent_ts = EXCLUDED.sent_ts`,
 			deviceUID, recipient, code, now,
 		)
-		if err != nil {
-			return fmt.Errorf("db: upsert confirm_codes: %w", err)
+		if upsertErr != nil {
+			return fmt.Errorf("db: upsert confirm_codes: %w", upsertErr)
 		}
+	}
+
+	// Skip RabbitMQ publish for test accounts
+	if testCode != "" {
+		return nil
 	}
 
 	// Publish event to RabbitMQ
