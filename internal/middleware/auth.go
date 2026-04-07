@@ -10,6 +10,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Error code constants for middleware responses
+const (
+	codeUnauthorized      = "ERR_UNAUTHORIZED"
+	codeForbidden         = "ERR_FORBIDDEN"
+	codeRegistrationToken = "ERR_REGISTRATION_TOKEN"
+)
+
 // Auth middleware validates Bearer token or X-API-Key header.
 // It checks the Redis cache first; on cache miss it queries the sessions table,
 // then caches the result with TTL = expire_date - now.
@@ -29,7 +36,7 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		}
 
 		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization token required", "code": codeUnauthorized})
 			return
 		}
 
@@ -40,7 +47,7 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 				if sd.AuthType == "registration" {
 					path := c.FullPath()
 					if path != "/auth/verify/email" && path != "/auth/verify/phone" && path != "/auth/send-code" {
-						c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification"})
+						c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification", "code": codeRegistrationToken})
 						return
 					}
 				}
@@ -58,7 +65,7 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 
 		// 2. Cache miss — query DB
 		if pool == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "database unavailable"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "database unavailable", "code": codeUnauthorized})
 			return
 		}
 
@@ -75,17 +82,17 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		`, token).Scan(&userID, &email, &phone, &role, &verifyStatus, &blocked, &expireDate, &authType)
 
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token", "code": codeUnauthorized})
 			return
 		}
 
 		if blocked {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has been revoked"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has been revoked", "code": codeUnauthorized})
 			return
 		}
 
 		if expireDate != nil && time.Now().After(*expireDate) {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has expired"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has expired", "code": codeUnauthorized})
 			return
 		}
 
@@ -93,7 +100,7 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		if authType == "registration" {
 			path := c.FullPath()
 			if path != "/auth/verify/email" && path != "/auth/verify/phone" && path != "/auth/send-code" {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification"})
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification", "code": codeRegistrationToken})
 				return
 			}
 		}
@@ -146,18 +153,18 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, exists := c.Get("role")
 		if !exists {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated", "code": codeUnauthorized})
 			return
 		}
 
 		roleStr, ok := role.(string)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid role"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid role", "code": codeUnauthorized})
 			return
 		}
 
 		if _, ok := allowed[roleStr]; !ok {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "access denied: insufficient role"})
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "access denied: insufficient role", "code": codeForbidden})
 			return
 		}
 

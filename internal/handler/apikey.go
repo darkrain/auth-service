@@ -32,18 +32,18 @@ func CreateAPIKey(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
 		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			c.JSON(http.StatusUnauthorized, errResp(CodeUnauthorized, "not authenticated"))
 			return
 		}
 		userID, ok := userIDVal.(int)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user id"})
+			c.JSON(http.StatusUnauthorized, errResp(CodeUnauthorized, "invalid user id"))
 			return
 		}
 
 		key, err := service.CreateAPIKey(c.Request.Context(), pool, userID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create API key"})
+			c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "failed to create API key"))
 			return
 		}
 
@@ -70,18 +70,18 @@ func ListAPIKeys(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
 		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			c.JSON(http.StatusUnauthorized, errResp(CodeUnauthorized, "not authenticated"))
 			return
 		}
 		userID, ok := userIDVal.(int)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user id"})
+			c.JSON(http.StatusUnauthorized, errResp(CodeUnauthorized, "invalid user id"))
 			return
 		}
 
 		keys, err := service.ListAPIKeys(c.Request.Context(), pool, userID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list API keys"})
+			c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "failed to list API keys"))
 			return
 		}
 
@@ -107,28 +107,28 @@ func RevokeAPIKey(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
 		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			c.JSON(http.StatusUnauthorized, errResp(CodeUnauthorized, "not authenticated"))
 			return
 		}
 		userID, ok := userIDVal.(int)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user id"})
+			c.JSON(http.StatusUnauthorized, errResp(CodeUnauthorized, "invalid user id"))
 			return
 		}
 
 		keyIDStr := c.Param("id")
 		keyID, err := strconv.Atoi(keyIDStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid key id"})
+			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "invalid key id"))
 			return
 		}
 
 		if err := service.RevokeAPIKey(c.Request.Context(), pool, cacheClient, keyID, userID); err != nil {
 			if errors.Is(err, service.ErrNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "API key not found"})
+				c.JSON(http.StatusNotFound, errResp(CodeUserNotFound, "API key not found"))
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to revoke API key"})
+			c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "failed to revoke API key"))
 			return
 		}
 

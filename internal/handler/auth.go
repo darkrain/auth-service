@@ -46,6 +46,7 @@ type registerResponse struct {
 
 type errorResponse struct {
 	Error string `json:"error" example:"error description"`
+	Code  string `json:"code" example:"ERR_INVALID_REQUEST"`
 }
 
 // Login handles POST /auth/login
@@ -69,7 +70,7 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheC
 	return func(c *gin.Context) {
 		var req loginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "invalid request body"))
 			return
 		}
 
@@ -88,20 +89,32 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheC
 				c.JSON(http.StatusAccepted, gin.H{
 					"message":      "Code sent to your email/phone. Please verify.",
 					"requires_2fa": true,
+					"code":         Code2FARequired,
 				})
 			case errors.Is(err, service.ErrAccountLocked):
-				c.JSON(http.StatusTooManyRequests, gin.H{"error": "Account temporarily locked due to too many failed attempts"})
+				c.JSON(http.StatusTooManyRequests, errResp(CodeAccountLocked, "Account temporarily locked due to too many failed attempts"))
 			case errors.Is(err, service.ErrValidation):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
 			case errors.Is(err, service.ErrNotFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+				c.JSON(http.StatusNotFound, errResp(CodeUserNotFound, "user not found"))
 			case errors.Is(err, service.ErrForbidden):
 				msg := strings.TrimPrefix(err.Error(), "forbidden: ")
-				c.JSON(http.StatusForbidden, gin.H{"error": msg})
+				var errCode string
+				switch {
+				case strings.Contains(msg, "not verified"):
+					errCode = CodeNotVerified
+				case strings.Contains(msg, "banned"):
+					errCode = CodeBanned
+				case strings.Contains(msg, "deleted"):
+					errCode = CodeDeleted
+				default:
+					errCode = CodeForbidden
+				}
+				c.JSON(http.StatusForbidden, errResp(errCode, msg))
 			case errors.Is(err, service.ErrUnauthorized):
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+				c.JSON(http.StatusUnauthorized, errResp(CodeInvalidCredentials, "invalid credentials"))
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+				c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))
 			}
 			return
 		}
@@ -129,18 +142,18 @@ func Logout(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if !strings.HasPrefix(authHeader, "Bearer ") {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
+			c.JSON(http.StatusUnauthorized, errResp(CodeUnauthorized, "authorization token required"))
 			return
 		}
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		token = strings.TrimSpace(token)
 		if token == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
+			c.JSON(http.StatusUnauthorized, errResp(CodeUnauthorized, "authorization token required"))
 			return
 		}
 
 		if err := service.Logout(c.Request.Context(), pool, cacheClient, token); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))
 			return
 		}
 
@@ -200,7 +213,7 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 	return func(c *gin.Context) {
 		var req registerRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "invalid request body"))
 			return
 		}
 
@@ -219,22 +232,22 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidEmail) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidEmail, "Invalid email format"))
 				return
 			}
 			if errors.Is(err, service.ErrInvalidPhone) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid phone format. Use international format: +79991234567"})
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidPhone, "Invalid phone format. Use international format: +79991234567"))
 				return
 			}
 			if errors.Is(err, service.ErrValidation) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
 				return
 			}
 			if errors.Is(err, service.ErrAlreadyExists) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Login already registered"})
+				c.JSON(http.StatusBadRequest, errResp(CodeLoginExists, "Login already registered"))
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))
 			return
 		}
 
