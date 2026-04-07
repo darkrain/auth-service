@@ -43,6 +43,11 @@ type RateLimit struct {
 	Code    RateLimitCode    `json:"Code"`
 }
 
+type TestAccount struct {
+	Login string `json:"login"`
+	Code  string `json:"code"`
+}
+
 type Config struct {
 	Host                  string    `json:"Host"`
 	Port                  string    `json:"Port"`
@@ -73,6 +78,7 @@ type Config struct {
 	TrustedProxies           []string  `json:"TrustedProxies"`
 	PostgreSQLSSLMode         string    `json:"PostgreSQLSSLMode"`
 	SwaggerEnabled            bool      `json:"SwaggerEnabled"`
+	TestAccounts              []TestAccount `json:"TestAccounts"`
 }
 
 func Load(path string) (*Config, error) {

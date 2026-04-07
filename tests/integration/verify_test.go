@@ -304,6 +304,75 @@ func TestRegistrationToken_CannotAccessMe(t *testing.T) {
 	}
 }
 
+// TestFixedVerificationCode verifies that a test account uses the fixed verification code
+// and skips RabbitMQ (code is saved to DB directly).
+func TestFixedVerificationCode(t *testing.T) {
+	truncateTables(t)
+
+	login := "testaccount@example.com"
+	password := "Password1"
+	deviceUID := "device-fixed-code"
+
+	// Register with the test account email
+	registrationToken := registerUser(t, login, password)
+	if registrationToken == "" {
+		t.Fatal("expected registration_token in register response")
+	}
+
+	// Call send-code — should use fixed code "111111" and NOT publish to RabbitMQ
+	w := doRequest("POST", "/auth/send-code", map[string]string{
+		"recipient":  login,
+		"device_uid": deviceUID,
+	}, registrationToken)
+	if w.Code != http.StatusOK {
+		t.Fatalf("send-code: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify with the fixed code "111111" → should succeed
+	w = doRequest("POST", "/auth/verify/email", map[string]string{
+		"recipient":  login,
+		"code":       "111111",
+		"device_uid": deviceUID,
+	}, registrationToken)
+	if w.Code != http.StatusOK {
+		t.Fatalf("verify with fixed code: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestFixedVerificationCode_WrongCode verifies that a wrong code for a test account still fails.
+func TestFixedVerificationCode_WrongCode(t *testing.T) {
+	truncateTables(t)
+
+	login := "testaccount@example.com"
+	password := "Password1"
+	deviceUID := "device-fixed-code-wrong"
+
+	// Register with the test account email
+	registrationToken := registerUser(t, login, password)
+	if registrationToken == "" {
+		t.Fatal("expected registration_token in register response")
+	}
+
+	// Call send-code
+	w := doRequest("POST", "/auth/send-code", map[string]string{
+		"recipient":  login,
+		"device_uid": deviceUID,
+	}, registrationToken)
+	if w.Code != http.StatusOK {
+		t.Fatalf("send-code: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify with a wrong code → should fail with 400
+	w = doRequest("POST", "/auth/verify/email", map[string]string{
+		"recipient":  login,
+		"code":       "000000",
+		"device_uid": deviceUID,
+	}, registrationToken)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("verify with wrong code: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestRegistrationToken_InvalidatedAfterVerification verifies that after successful
 // email verification the registration token is blocked and cannot be reused.
 func TestRegistrationToken_InvalidatedAfterVerification(t *testing.T) {
