@@ -186,6 +186,10 @@ func main() {
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
 		handler.VerifyLogin2FA(pgPool, cfg))
 
+	// Password reset (public — no auth required)
+	r.POST("/auth/password/reset-request", handler.ResetRequest(pgPool, rmqConn, cfg, cacheClient))
+	r.POST("/auth/password/reset-confirm", handler.ResetConfirm(pgPool, cfg, cacheClient))
+
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pgPool, cacheClient))

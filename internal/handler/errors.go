@@ -27,6 +27,9 @@ const (
 	CodeForbidden          = "ERR_FORBIDDEN"
 	CodeInternal           = "ERR_INTERNAL"
 	CodeRegistrationToken  = "ERR_REGISTRATION_TOKEN"
+	CodeInvalidCode        = "ERR_INVALID_CODE"
+	CodeCodeExpired        = "ERR_CODE_EXPIRED"
+	CodeWeakPassword       = "ERR_WEAK_PASSWORD"
 )
 
 // errResp returns a gin.H with error message and code

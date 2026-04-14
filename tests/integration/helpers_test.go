@@ -91,6 +91,10 @@ func TestMain(m *testing.M) {
 	r.POST("/auth/logout", handler.Logout(pool, testCache))
 	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pool, cfg))
 
+	// Password reset (public — no auth required)
+	r.POST("/auth/password/reset-request", handler.ResetRequest(pool, nil, cfg, testCache))
+	r.POST("/auth/password/reset-confirm", handler.ResetConfirm(pool, cfg, testCache))
+
 	// Protected routes
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pool, testCache))
