@@ -72,9 +72,11 @@ type Config struct {
 	RmqExchangeName       string    `json:"RmqExchangeName"`
 	RmqExchangeKind       string    `json:"RmqExchangeKind"`
 	RateLimit             RateLimit `json:"RateLimit"`
-	SessionTTLDays           int       `json:"SessionTTLDays"`
-	RegistrationTokenTTLMin  int       `json:"RegistrationTokenTTLMin"`
-	TwoFactorEnabled         bool      `json:"TwoFactorEnabled"`
+	SessionTTLDays                int       `json:"SessionTTLDays"`
+	RegistrationTokenTTLMin        int       `json:"RegistrationTokenTTLMin"`
+	TwoFactorEnabled               bool      `json:"TwoFactorEnabled"`
+	PasswordResetCodeTTLMin        int       `json:"PasswordResetCodeTTLMin"`
+	PasswordResetRateLimitPerHour  int       `json:"PasswordResetRateLimitPerHour"`
 	TrustedProxies           []string  `json:"TrustedProxies"`
 	AllowedOrigins           []string  `json:"AllowedOrigins"`
 	PostgreSQLSSLMode         string    `json:"PostgreSQLSSLMode"`
@@ -98,6 +100,16 @@ func Load(path string) (*Config, error) {
 	// Default PostgreSQLSSLMode to "disable" if not set (backward compatible)
 	if cfg.PostgreSQLSSLMode == "" {
 		cfg.PostgreSQLSSLMode = "disable"
+	}
+
+	// Default PasswordResetCodeTTLMin
+	if cfg.PasswordResetCodeTTLMin == 0 {
+		cfg.PasswordResetCodeTTLMin = 15
+	}
+
+	// Default PasswordResetRateLimitPerHour
+	if cfg.PasswordResetRateLimitPerHour == 0 {
+		cfg.PasswordResetRateLimitPerHour = 3
 	}
 
 	return &cfg, nil
@@ -135,6 +147,13 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("config: TestAccounts[%d].code must not be empty", i)
 		}
 	}
+	if c.PasswordResetCodeTTLMin <= 0 {
+		return errors.New("config: PasswordResetCodeTTLMin must be greater than 0")
+	}
+	if c.PasswordResetRateLimitPerHour <= 0 {
+		return errors.New("config: PasswordResetRateLimitPerHour must be greater than 0")
+	}
+
 	for _, role := range c.AllowedRoles {
 		if role == "admin" || role == "system" {
 			return fmt.Errorf("config: AllowedRoles must not contain reserved role %q", role)

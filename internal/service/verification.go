@@ -86,7 +86,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	if pool != nil && cfg.RateLimit.Code.TTLSec > 0 {
 		var oldSentTS time.Time
 		err := pool.QueryRow(ctx,
-			`SELECT sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 LIMIT 1`,
+			`SELECT sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 AND auth_type='verification' LIMIT 1`,
 			deviceUID, recipient,
 		).Scan(&oldSentTS)
 		if err == nil {
@@ -125,9 +125,9 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	// UPSERT into confirm_codes
 	if pool != nil {
 		_, upsertErr := pool.Exec(ctx,
-			`INSERT INTO confirm_codes (device_uid, recipient, code, counter, sent_ts)
-			 VALUES ($1, $2, $3, 0, $4)
-			 ON CONFLICT (device_uid, recipient) DO UPDATE
+			`INSERT INTO confirm_codes (device_uid, recipient, code, counter, sent_ts, auth_type)
+			 VALUES ($1, $2, $3, 0, $4, 'verification')
+			 ON CONFLICT (device_uid, recipient, auth_type) DO UPDATE
 			 SET code = EXCLUDED.code, counter = 0, sent_ts = EXCLUDED.sent_ts`,
 			deviceUID, recipient, code, now,
 		)
@@ -246,7 +246,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 	var sentTS time.Time
 
 	err := pool.QueryRow(ctx,
-		`SELECT code, counter, sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 LIMIT 1`,
+		`SELECT code, counter, sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 AND auth_type='verification' LIMIT 1`,
 		deviceUID, recipient,
 	).Scan(&storedCode, &counter, &sentTS)
 	if err != nil {
@@ -270,7 +270,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 	if code != storedCode {
 		// Increment counter
 		_, _ = pool.Exec(ctx,
-			`UPDATE confirm_codes SET counter=counter+1 WHERE device_uid=$1 AND recipient=$2`,
+			`UPDATE confirm_codes SET counter=counter+1 WHERE device_uid=$1 AND recipient=$2 AND auth_type='verification'`,
 			deviceUID, recipient,
 		)
 		return fmt.Errorf("%w: invalid verification code", ErrUnauthorized)
@@ -293,7 +293,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 	}
 
 	_, err = pool.Exec(ctx,
-		`DELETE FROM confirm_codes WHERE device_uid=$1 AND recipient=$2`,
+		`DELETE FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 AND auth_type='verification'`,
 		deviceUID, recipient,
 	)
 	if err != nil {
