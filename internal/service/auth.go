@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -266,7 +267,7 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 		if cfg.RateLimit.Code.MaxAttempts > 0 && counter >= int64(cfg.RateLimit.Code.MaxAttempts) {
 			return nil, fmt.Errorf("%w: Too many attempts. Request a new code.", ErrTooManyRequests)
 		}
-		if req.Code != storedCode {
+		if subtle.ConstantTimeCompare([]byte(req.Code), []byte(storedCode)) != 1 {
 			_, _ = pool.Exec(ctx,
 				`UPDATE confirm_codes SET counter=counter+1 WHERE device_uid=$1 AND recipient=$2`,
 				req.DeviceUID, req.Login,

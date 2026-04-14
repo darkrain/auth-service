@@ -35,6 +35,11 @@ func NewClient(cfg *config.Config) *Client {
 	return &Client{rdb: rdb}
 }
 
+// Ping checks the Redis connection.
+func (c *Client) Ping(ctx context.Context) error {
+	return c.rdb.Ping(ctx).Err()
+}
+
 func sessionKey(token string) string {
 	return "session:" + token
 }

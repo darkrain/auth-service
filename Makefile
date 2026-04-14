@@ -19,6 +19,7 @@ vendor:
 
 build:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BIN_DIR)/$(BIN_FILE) ./cmd/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BIN_DIR)/$(BIN_FILE)-arm64 ./cmd/main.go
 
 test:
 	go test ./...
@@ -50,16 +51,31 @@ swagger:
 	swag init -g cmd/main.go -o docs/
 
 deb: build
-	$(eval DEB_NAME := $(BIN_FILE)_$(VERSION)_amd64)
-	mkdir -p /tmp/$(DEB_NAME)/DEBIAN
-	mkdir -p /tmp/$(DEB_NAME)/usr/bin
-	mkdir -p /tmp/$(DEB_NAME)/etc/systemd/system
-	mkdir -p /tmp/$(DEB_NAME)/etc/auth-service
-	install -m 0755 $(BIN_DIR)/$(BIN_FILE) /tmp/$(DEB_NAME)/usr/bin/$(BIN_FILE)
-	install -m 0644 auth-service.service /tmp/$(DEB_NAME)/etc/systemd/system/auth-service.service
-	install -m 0600 auth-service.example.json /tmp/$(DEB_NAME)/etc/auth-service/config.json
+	$(eval DEB_AMD64 := $(BIN_FILE)_$(VERSION)_amd64)
+	mkdir -p /tmp/$(DEB_AMD64)/DEBIAN
+	chmod 0755 /tmp/$(DEB_AMD64)/DEBIAN
+	mkdir -p /tmp/$(DEB_AMD64)/usr/bin
+	mkdir -p /tmp/$(DEB_AMD64)/etc/systemd/system
+	mkdir -p /tmp/$(DEB_AMD64)/etc/auth-service
+	install -m 0755 $(BIN_DIR)/$(BIN_FILE) /tmp/$(DEB_AMD64)/usr/bin/$(BIN_FILE)
+	install -m 0644 auth-service.service /tmp/$(DEB_AMD64)/etc/systemd/system/auth-service.service
+	install -m 0600 auth-service.example.json /tmp/$(DEB_AMD64)/etc/auth-service/config.json
 	printf 'Package: $(BIN_FILE)\nVersion: $(VERSION)\nArchitecture: amd64\nMaintainer: darkrain\nDescription: auth-service\n' \
-		> /tmp/$(DEB_NAME)/DEBIAN/control
-	dpkg-deb --build /tmp/$(DEB_NAME) $(BIN_DIR)/$(DEB_NAME).deb
-	rm -rf /tmp/$(DEB_NAME)
-	@echo "Built: $(BIN_DIR)/$(DEB_NAME).deb"
+		> /tmp/$(DEB_AMD64)/DEBIAN/control
+	dpkg-deb --build /tmp/$(DEB_AMD64) $(BIN_DIR)/$(DEB_AMD64).deb
+	rm -rf /tmp/$(DEB_AMD64)
+	@echo "Built: $(BIN_DIR)/$(DEB_AMD64).deb"
+	$(eval DEB_ARM64 := $(BIN_FILE)_$(VERSION)_arm64)
+	mkdir -p /tmp/$(DEB_ARM64)/DEBIAN
+	chmod 0755 /tmp/$(DEB_ARM64)/DEBIAN
+	mkdir -p /tmp/$(DEB_ARM64)/usr/bin
+	mkdir -p /tmp/$(DEB_ARM64)/etc/systemd/system
+	mkdir -p /tmp/$(DEB_ARM64)/etc/auth-service
+	install -m 0755 $(BIN_DIR)/$(BIN_FILE)-arm64 /tmp/$(DEB_ARM64)/usr/bin/$(BIN_FILE)
+	install -m 0644 auth-service.service /tmp/$(DEB_ARM64)/etc/systemd/system/auth-service.service
+	install -m 0600 auth-service.example.json /tmp/$(DEB_ARM64)/etc/auth-service/config.json
+	printf 'Package: $(BIN_FILE)\nVersion: $(VERSION)\nArchitecture: arm64\nMaintainer: darkrain\nDescription: auth-service\n' \
+		> /tmp/$(DEB_ARM64)/DEBIAN/control
+	dpkg-deb --build /tmp/$(DEB_ARM64) $(BIN_DIR)/$(DEB_ARM64).deb
+	rm -rf /tmp/$(DEB_ARM64)
+	@echo "Built: $(BIN_DIR)/$(DEB_ARM64).deb"
