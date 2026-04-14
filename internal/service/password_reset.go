@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -234,7 +235,7 @@ func ConfirmPasswordReset(
 	}
 
 	// Compare code
-	if code != storedCode {
+	if subtle.ConstantTimeCompare([]byte(code), []byte(storedCode)) != 1 {
 		// Increment counter
 		_, _ = pool.Exec(ctx,
 			`UPDATE confirm_codes SET counter=counter+1

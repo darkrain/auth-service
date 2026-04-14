@@ -38,7 +38,6 @@ import (
 	"github.com/darkrain/auth-service/internal/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -94,23 +93,16 @@ func main() {
 		db.StartSessionCleanup(ctx, pgPool, log.Default())
 	}
 
-	// Redis
-	rdb := redis.NewClient(&redis.Options{
-		Network: cfg.RedisDatabaseNetwork,
-		Addr:    fmt.Sprintf("%s:%s", cfg.RedisDatabaseHost, cfg.RedisDatabasePort),
-	})
-	defer rdb.Close()
+	cacheClient := cache.NewClient(cfg)
 
 	// Ping Redis in background — don't block startup
 	go func() {
-		if err := rdb.Ping(context.Background()).Err(); err != nil {
+		if err := cacheClient.Ping(context.Background()); err != nil {
 			log.Printf("WARNING: Redis not available: %v", err)
 		} else {
 			log.Println("Redis connected")
 		}
 	}()
-
-	cacheClient := cache.NewClient(cfg)
 
 	// RabbitMQ
 	rmqConn, err := broker.Connect(cfg)
@@ -187,8 +179,16 @@ func main() {
 		handler.VerifyLogin2FA(pgPool, cfg))
 
 	// Password reset (public — no auth required)
-	r.POST("/auth/password/reset-request", handler.ResetRequest(pgPool, rmqConn, cfg, cacheClient))
-	r.POST("/auth/password/reset-confirm", handler.ResetConfirm(pgPool, cfg, cacheClient))
+	r.POST("/auth/password/reset-request",
+		middleware.RateLimit(cacheClient, rmqConn, "/auth/password/reset-request",
+			cfg.RateLimit.IP.SendCodeMaxAttempts, cfg.RateLimit.IP.SendCodeWindowSec,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.ResetRequest(pgPool, rmqConn, cfg, cacheClient))
+	r.POST("/auth/password/reset-confirm",
+		middleware.RateLimit(cacheClient, rmqConn, "/auth/password/reset-confirm",
+			cfg.RateLimit.IP.SendCodeMaxAttempts, cfg.RateLimit.IP.SendCodeWindowSec,
+			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
+		handler.ResetConfirm(pgPool, cfg, cacheClient))
 
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")

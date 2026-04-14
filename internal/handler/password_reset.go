@@ -99,7 +99,7 @@ func ResetConfirm(pool *pgxpool.Pool, cfg *config.Config, cacheClient *cache.Cli
 		if err != nil {
 			switch {
 			case errors.Is(err, service.ErrNotFound):
-				c.JSON(http.StatusNotFound, errResp(CodeUserNotFound, "user not found"))
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidCode, "invalid reset code"))
 			case errors.Is(err, service.ErrCodeExpired):
 				c.JSON(http.StatusBadRequest, errResp(CodeCodeExpired, "reset code has expired"))
 			case errors.Is(err, service.ErrInvalidCode):

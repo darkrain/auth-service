@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -267,7 +268,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 	}
 
 	// Compare code
-	if code != storedCode {
+	if subtle.ConstantTimeCompare([]byte(code), []byte(storedCode)) != 1 {
 		// Increment counter
 		_, _ = pool.Exec(ctx,
 			`UPDATE confirm_codes SET counter=counter+1 WHERE device_uid=$1 AND recipient=$2 AND auth_type='verification'`,
