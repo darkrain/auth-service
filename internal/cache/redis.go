@@ -29,8 +29,9 @@ type Client struct {
 // NewClient creates a Redis client from config.
 func NewClient(cfg *config.Config) *Client {
 	rdb := redis.NewClient(&redis.Options{
-		Network: cfg.RedisDatabaseNetwork,
-		Addr:    cfg.RedisDatabaseHost + ":" + cfg.RedisDatabasePort,
+		Network:  cfg.RedisDatabaseNetwork,
+		Addr:     cfg.RedisDatabaseHost + ":" + cfg.RedisDatabasePort,
+		Password: cfg.RedisPassword,
 	})
 	return &Client{rdb: rdb}
 }

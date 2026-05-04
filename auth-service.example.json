@@ -15,6 +15,7 @@
   "RedisDatabaseNetwork": "tcp",
   "RedisDatabaseHost": "localhost",
   "RedisDatabasePort": "6380",
+  "RedisPassword": "superredispassword",
   "RmqHost": "localhost:5672",
   "RmqUser": "rmquser",
   "RmqPassword": "",
