@@ -60,6 +60,7 @@ deb: build
 	install -m 0755 $(BIN_DIR)/$(BIN_FILE) /tmp/$(DEB_AMD64)/usr/bin/$(BIN_FILE)
 	install -m 0644 auth-service.service /tmp/$(DEB_AMD64)/etc/systemd/system/auth-service.service
 	install -m 0600 auth-service.example.json /tmp/$(DEB_AMD64)/etc/auth-service/config.json
+	cp -r migrations /tmp/$(DEB_AMD64)/etc/auth-service/
 	printf 'Package: $(BIN_FILE)\nVersion: $(VERSION)\nArchitecture: amd64\nMaintainer: darkrain\nDescription: auth-service\n' \
 		> /tmp/$(DEB_AMD64)/DEBIAN/control
 	dpkg-deb --build /tmp/$(DEB_AMD64) $(BIN_DIR)/$(DEB_AMD64).deb
@@ -74,6 +75,7 @@ deb: build
 	install -m 0755 $(BIN_DIR)/$(BIN_FILE)-arm64 /tmp/$(DEB_ARM64)/usr/bin/$(BIN_FILE)
 	install -m 0644 auth-service.service /tmp/$(DEB_ARM64)/etc/systemd/system/auth-service.service
 	install -m 0600 auth-service.example.json /tmp/$(DEB_ARM64)/etc/auth-service/config.json
+	cp -r migrations /tmp/$(DEB_ARM64)/etc/auth-service/
 	printf 'Package: $(BIN_FILE)\nVersion: $(VERSION)\nArchitecture: arm64\nMaintainer: darkrain\nDescription: auth-service\n' \
 		> /tmp/$(DEB_ARM64)/DEBIAN/control
 	dpkg-deb --build /tmp/$(DEB_ARM64) $(BIN_DIR)/$(DEB_ARM64).deb
