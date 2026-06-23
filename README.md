@@ -57,6 +57,11 @@ make run
 
 This uses `auth-service.example.json` as the config by default.
 
+`AllowedRoles` controls public registration roles. For iamfree webapp registration
+it must include `model`, `manager`, `agency` and `client`. The `client` role is
+used by the topmember registration flow when the webapp URL contains
+`?topmember=true`.
+
 To use a custom config:
 
 ```bash
