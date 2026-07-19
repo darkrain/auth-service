@@ -26,6 +26,11 @@ A lightweight authentication and authorization microservice built with Go and Gi
 | POST | `/auth/verify/phone` | Bearer registration/session token | Verify phone number |
 | POST | `/auth/login/verify-2fa` | — | Complete 2FA login |
 | GET | `/auth/me` | Bearer | Get current user info |
+| GET | `/auth/contact_verifications/defrec/` | Bearer session token | API-driven contact verification metadata |
+| PUT | `/auth/contact_verifications` | Bearer session token | Request email/phone change verification code |
+| POST | `/auth/contact_verifications/id/:id` | Bearer session token | Confirm email/phone change code |
+| GET | `/auth/contact_verifications` | Bearer session token | List own contact verification requests |
+| GET | `/auth/contact_verifications/view/id/:id` | Bearer session token | View own contact verification request |
 | POST | `/auth/api-keys` | Bearer + admin/system | Create API key |
 | GET | `/auth/api-keys` | Bearer + admin/system | List API keys |
 | DELETE | `/auth/api-keys/:id` | Bearer + admin/system | Revoke API key |
@@ -133,6 +138,52 @@ Important details:
 - `/auth/send-code` can be called with either `registration_token` or a normal session token.
 - `/auth/verify/email` and `/auth/verify/phone` require a token so the service can check that the recipient belongs to the current user.
 - `message-delivery` never validates auth tokens. It only receives a generic delivery event and sends the message.
+
+### Auth-owned request-generator modules
+
+`auth-service` uses `github.com/darkrain/request-generator` for account modules that must be consumed by the universal frontend without going through the main API service.
+
+Current module:
+
+| Module | Path | Purpose |
+|---|---|---|
+| `contact_verifications` | `/auth/contact_verifications` | Confirm ownership of a new email address or phone number before changing `users.email`/`users.phone`. |
+
+The module uses standard request-generator CRUD actions:
+
+| CRUD action | Meaning in this module |
+|---|---|
+| `defrec` | Returns universal renderer metadata, including `field_flow.type=verified_contact` and `module_ref.namespace=auth-service`. |
+| `add` | Creates a pending verification request and publishes an auth code through `message-delivery`. |
+| `update` | Confirms the code and updates the authenticated user's email or phone. |
+| `list/view` | Returns the user's verification request history/status. |
+
+No main API dependency is required. The frontend selects the auth source from metadata and calls the same CRUD route shape under the auth-service prefix.
+
+Contact change flow:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant W as webapp universal renderer
+    participant A as auth-service
+    participant DB as PostgreSQL
+    participant MQ as RabbitMQ
+    participant D as message-delivery
+
+    W->>A: GET /auth/contact_verifications/defrec/
+    A-->>W: fields + extra.field_flow + module_ref
+    W->>A: PUT /auth/contact_verifications<br/>contact_type, recipient, device_uid, provider
+    A->>DB: validate current user and create pending request
+    A->>MQ: publish message.delivery.requested
+    MQ->>D: deliver verification code
+    A-->>W: 200 { value: verification_id }
+    W->>A: POST /auth/contact_verifications/id/{id}<br/>code
+    A->>DB: check owner, status, TTL, attempts, code
+    A->>DB: update users.email/users.phone and verified flag
+    A->>DB: mark request confirmed
+    A-->>W: 200 confirmed request view
+```
 
 ### Config
 
@@ -325,6 +376,7 @@ Weekly Go module updates are configured via `.github/dependabot.yml`.
 │   ├── db/                # PostgreSQL connection + migrations + seed
 │   ├── handler/           # HTTP handlers (Gin)
 │   ├── middleware/         # Auth, rate limit, role middleware
+│   ├── modules/            # request-generator auth-owned modules
 │   └── service/           # Business logic
 ├── migrations/            # SQL migration files
 ├── tests/

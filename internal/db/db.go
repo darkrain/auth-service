@@ -2,20 +2,22 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"time"
 
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func Connect(cfg *config.Config) (*pgxpool.Pool, error) {
+func DSN(cfg *config.Config) string {
 	sslMode := cfg.PostgreSQLSSLMode
 	if sslMode == "" {
 		sslMode = "disable"
 	}
-	dsn := fmt.Sprintf(
+	return fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		cfg.PostgreSqlHost,
 		cfg.PostgreSqlPort,
@@ -24,8 +26,10 @@ func Connect(cfg *config.Config) (*pgxpool.Pool, error) {
 		cfg.PostgreSqlDatabase,
 		sslMode,
 	)
+}
 
-	pool, err := pgxpool.New(context.Background(), dsn)
+func Connect(cfg *config.Config) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(context.Background(), DSN(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("db: create pool: %w", err)
 	}
@@ -36,6 +40,18 @@ func Connect(cfg *config.Config) (*pgxpool.Pool, error) {
 	}
 
 	return pool, nil
+}
+
+func ConnectSQL(cfg *config.Config) (*sql.DB, error) {
+	sqlDB, err := sql.Open("pgx", DSN(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("db: open sql: %w", err)
+	}
+	if err := sqlDB.Ping(); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("db: ping sql: %w", err)
+	}
+	return sqlDB, nil
 }
 
 // StartSessionCleanup starts a background goroutine that deletes expired sessions every 24 hours.

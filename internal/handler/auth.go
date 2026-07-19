@@ -169,10 +169,12 @@ func Logout(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 }
 
 type meResponse struct {
-	ID           int    `json:"id" example:"1"`
-	Email        string `json:"email" example:"user@example.com"`
-	Phone        string `json:"phone" example:"+79001234567"`
-	VerifyStatus string `json:"verify_status" example:"verified"`
+	ID            int    `json:"id" example:"1"`
+	Email         string `json:"email" example:"user@example.com"`
+	EmailVerified bool   `json:"email_verified" example:"true"`
+	Phone         string `json:"phone" example:"+79001234567"`
+	PhoneVerified bool   `json:"phone_verified" example:"false"`
+	VerifyStatus  string `json:"verify_status" example:"verified"`
 }
 
 // Me handles GET /auth/me — returns current user data from session context.
@@ -192,13 +194,17 @@ func Me() gin.HandlerFunc {
 		phone, _ := c.Get("phone")
 		role, _ := c.Get("role")
 		verifyStatus, _ := c.Get("verify_status")
+		emailVerified, _ := c.Get("email_verified")
+		phoneVerified, _ := c.Get("phone_verified")
 
 		c.JSON(http.StatusOK, gin.H{
-			"id":            userID,
-			"email":         email,
-			"phone":         phone,
-			"role":          role,
-			"verify_status": verifyStatus,
+			"id":             userID,
+			"email":          email,
+			"email_verified": emailVerified,
+			"phone":          phone,
+			"phone_verified": phoneVerified,
+			"role":           role,
+			"verify_status":  verifyStatus,
 		})
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/darkrain/auth-service/internal/cache"
+	"github.com/darkrain/request-generator/icontext"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -53,11 +54,14 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 				}
 				c.Set("user_id", sd.UserID)
 				c.Set("email", sd.Email)
+				c.Set("email_verified", sd.EmailVerified)
 				c.Set("phone", sd.Phone)
+				c.Set("phone_verified", sd.PhoneVerified)
 				c.Set("role", sd.Role)
 				c.Set("verify_status", sd.VerifyStatus)
 				c.Set("auth_type", sd.AuthType)
 				c.Set("token", token)
+				setRequestGeneratorUser(c, int64(sd.UserID), sd.Role)
 				c.Next()
 				return
 			}
@@ -71,15 +75,16 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 
 		var userID int
 		var email, phone, role, verifyStatus, authType string
+		var emailVerified, phoneVerified bool
 		var blocked bool
 		var expireDate *time.Time
 
 		err := pool.QueryRow(c.Request.Context(), `
-			SELECT s.user_id, COALESCE(u.email,''), COALESCE(u.phone,''), u.role, u.verify_status, s.blocked, s.expire_date, COALESCE(s.auth_type,'')
+			SELECT s.user_id, COALESCE(u.email,''), u.email_verified, COALESCE(u.phone,''), u.phone_verified, u.role, u.verify_status, s.blocked, s.expire_date, COALESCE(s.auth_type,'')
 			FROM sessions s
 			JOIN users u ON u.id = s.user_id
 			WHERE s.token = $1
-		`, token).Scan(&userID, &email, &phone, &role, &verifyStatus, &blocked, &expireDate, &authType)
+		`, token).Scan(&userID, &email, &emailVerified, &phone, &phoneVerified, &role, &verifyStatus, &blocked, &expireDate, &authType)
 
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token", "code": codeUnauthorized})
@@ -108,12 +113,14 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		// 3. Store in Redis cache with TTL = expire_date - now
 		if cacheClient != nil {
 			sd := &cache.SessionData{
-				UserID:       userID,
-				Email:        email,
-				Phone:        phone,
-				Role:         role,
-				VerifyStatus: verifyStatus,
-				AuthType:     authType,
+				UserID:        userID,
+				Email:         email,
+				EmailVerified: emailVerified,
+				Phone:         phone,
+				PhoneVerified: phoneVerified,
+				Role:          role,
+				VerifyStatus:  verifyStatus,
+				AuthType:      authType,
 			}
 			var ttl time.Duration
 			if expireDate != nil {
@@ -133,14 +140,22 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 
 		c.Set("user_id", userID)
 		c.Set("email", email)
+		c.Set("email_verified", emailVerified)
 		c.Set("phone", phone)
+		c.Set("phone_verified", phoneVerified)
 		c.Set("role", role)
 		c.Set("verify_status", verifyStatus)
 		c.Set("auth_type", authType)
 		c.Set("token", token)
+		setRequestGeneratorUser(c, int64(userID), role)
 
 		c.Next()
 	}
+}
+
+func setRequestGeneratorUser(c *gin.Context, userID int64, role string) {
+	ctx := icontext.SetUser(c.Request.Context(), &icontext.UserInfo{ID: userID, Role: role})
+	c.Request = c.Request.WithContext(ctx)
 }
 
 // RequireRole middleware checks that the authenticated user has one of the allowed roles.

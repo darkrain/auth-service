@@ -13,12 +13,14 @@ import (
 
 // SessionData holds the cached user session info.
 type SessionData struct {
-	UserID       int    `json:"user_id"`
-	Email        string `json:"email"`
-	Phone        string `json:"phone"`
-	Role         string `json:"role"`
-	VerifyStatus string `json:"verify_status"`
-	AuthType     string `json:"auth_type"`
+	UserID        int    `json:"user_id"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	Phone         string `json:"phone"`
+	PhoneVerified bool   `json:"phone_verified"`
+	Role          string `json:"role"`
+	VerifyStatus  string `json:"verify_status"`
+	AuthType      string `json:"auth_type"`
 }
 
 // Client wraps a redis.Client with session-specific helpers.

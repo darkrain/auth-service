@@ -21,6 +21,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
@@ -37,6 +38,10 @@ import (
 	"github.com/darkrain/auth-service/internal/db"
 	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/middleware"
+	authmodules "github.com/darkrain/auth-service/internal/modules"
+	rg "github.com/darkrain/request-generator"
+	rgactions "github.com/darkrain/request-generator/actions"
+	rgdb "github.com/darkrain/request-generator/db"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	swaggerFiles "github.com/swaggo/files"
@@ -72,6 +77,7 @@ func main() {
 
 	// PostgreSQL
 	var pgPool *pgxpool.Pool
+	var sqlDBForModules *sql.DB
 	rawPool, err := db.Connect(cfg)
 	if err != nil {
 		log.Printf("WARNING: PostgreSQL not available: %v", err)
@@ -92,6 +98,14 @@ func main() {
 
 		// LOW: background goroutine to clean up expired sessions every 24h
 		db.StartSessionCleanup(ctx, pgPool, log.Default())
+
+		if sqlDB, err := db.ConnectSQL(cfg); err != nil {
+			log.Printf("WARNING: request-generator SQL connection failed: %v", err)
+		} else {
+			sqlDBForModules = sqlDB
+			defer sqlDBForModules.Close()
+			log.Println("request-generator SQL connected")
+		}
 	}
 
 	cacheClient := cache.NewClient(cfg)
@@ -141,7 +155,7 @@ func main() {
 			}
 			if allowed {
 				c.Header("Access-Control-Allow-Origin", origin)
-				c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+				c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 				c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 				c.Header("Access-Control-Max-Age", "86400")
 			}
@@ -223,6 +237,20 @@ func main() {
 	// Authenticated user info
 	authRequired.GET("/auth/me", handler.Me())
 
+	if sqlDBForModules != nil {
+		moduleDB := rgdb.NewDB(sqlDBForModules)
+		generator := rg.NewGenerator(
+			func(module *rg.BaseModule) rgdb.DBExecutor { return moduleDB },
+			*r.Group("/"),
+			[]*rg.BaseModule{authmodules.ContactVerificationsModule(pgPool, rmqConn, cfg, cacheClient)},
+			requestGeneratorPermissionMiddleware(),
+			func(action rgactions.ModuleAction) gin.HandlerFunc {
+				return middleware.Auth(pgPool, cacheClient)
+			},
+		)
+		generator.Run()
+	}
+
 	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
 	log.Printf("starting server on %s", addr)
 
@@ -252,5 +280,35 @@ func main() {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server shutdown error: %v", err)
+	}
+}
+
+func requestGeneratorPermissionMiddleware() func(rgactions.ModuleAction, []rgactions.Role) gin.HandlerFunc {
+	return func(action rgactions.ModuleAction, permissions []rgactions.Role) gin.HandlerFunc {
+		allowed := make(map[string]struct{}, len(permissions))
+		allAllowed := false
+		for _, role := range permissions {
+			if role == rgactions.RoleAll {
+				allAllowed = true
+				continue
+			}
+			allowed[string(role)] = struct{}{}
+		}
+		return func(c *gin.Context) {
+			if allAllowed {
+				c.Next()
+				return
+			}
+			rawRole, ok := c.Get("role")
+			if !ok {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated", "code": "ERR_UNAUTHORIZED"})
+				return
+			}
+			if _, ok := allowed[fmt.Sprint(rawRole)]; !ok {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "access denied: insufficient role", "code": "ERR_FORBIDDEN"})
+				return
+			}
+			c.Next()
+		}
 	}
 }

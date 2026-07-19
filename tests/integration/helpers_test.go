@@ -18,6 +18,10 @@ import (
 	"github.com/darkrain/auth-service/internal/db"
 	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/middleware"
+	authmodules "github.com/darkrain/auth-service/internal/modules"
+	rg "github.com/darkrain/request-generator"
+	rgactions "github.com/darkrain/request-generator/actions"
+	rgdb "github.com/darkrain/request-generator/db"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -135,6 +139,23 @@ func TestMain(m *testing.M) {
 	// Authenticated user info
 	authRequired.GET("/auth/me", handler.Me())
 
+	sqlDB, err := db.ConnectSQL(cfg)
+	if err != nil {
+		panic(fmt.Sprintf("failed to connect SQL DB: %v", err))
+	}
+	defer sqlDB.Close()
+	moduleDB := rgdb.NewDB(sqlDB)
+	generator := rg.NewGenerator(
+		func(module *rg.BaseModule) rgdb.DBExecutor { return moduleDB },
+		*r.Group("/"),
+		[]*rg.BaseModule{authmodules.ContactVerificationsModule(pool, nil, cfg, testCache)},
+		testPermissionMiddleware(),
+		func(action rgactions.ModuleAction) gin.HandlerFunc {
+			return middleware.Auth(pool, testCache)
+		},
+	)
+	generator.Run()
+
 	testRouter = r
 
 	os.Exit(m.Run())
@@ -147,6 +168,7 @@ func truncateTables(t *testing.T) {
 
 	// Execute each statement separately — pgx doesn't support multi-statement in one Exec
 	statements := []string{
+		`DELETE FROM contact_verifications`,
 		`DELETE FROM confirm_codes`,
 		`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE role != 'system')`,
 		`DELETE FROM users WHERE role != 'system'`,
@@ -160,6 +182,36 @@ func truncateTables(t *testing.T) {
 	// Flush all Redis keys (test environment only)
 	if err := testCache.FlushTestDB(ctx); err != nil {
 		t.Logf("WARNING: redis flush failed: %v", err)
+	}
+}
+
+func testPermissionMiddleware() func(rgactions.ModuleAction, []rgactions.Role) gin.HandlerFunc {
+	return func(action rgactions.ModuleAction, permissions []rgactions.Role) gin.HandlerFunc {
+		allowed := make(map[string]struct{}, len(permissions))
+		allAllowed := false
+		for _, role := range permissions {
+			if role == rgactions.RoleAll {
+				allAllowed = true
+				continue
+			}
+			allowed[string(role)] = struct{}{}
+		}
+		return func(c *gin.Context) {
+			if allAllowed {
+				c.Next()
+				return
+			}
+			rawRole, ok := c.Get("role")
+			if !ok {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated", "code": "ERR_UNAUTHORIZED"})
+				return
+			}
+			if _, ok := allowed[fmt.Sprint(rawRole)]; !ok {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "access denied: insufficient role", "code": "ERR_FORBIDDEN"})
+				return
+			}
+			c.Next()
+		}
 	}
 }
 
