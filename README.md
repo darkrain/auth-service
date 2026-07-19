@@ -21,9 +21,9 @@ A lightweight authentication and authorization microservice built with Go and Gi
 | POST | `/auth/register` | — | Register a new user |
 | POST | `/auth/login` | — | Login with email/phone + password |
 | POST | `/auth/logout` | Bearer | Logout and invalidate token |
-| POST | `/auth/send-code` | Bearer | Send verification code |
-| POST | `/auth/verify/email` | Bearer | Verify email address |
-| POST | `/auth/verify/phone` | Bearer | Verify phone number |
+| POST | `/auth/send-code` | Bearer registration/session token | Send verification code |
+| POST | `/auth/verify/email` | Bearer registration/session token | Verify email address |
+| POST | `/auth/verify/phone` | Bearer registration/session token | Verify phone number |
 | POST | `/auth/login/verify-2fa` | — | Complete 2FA login |
 | GET | `/auth/me` | Bearer | Get current user info |
 | POST | `/auth/api-keys` | Bearer + admin/system | Create API key |
@@ -73,6 +73,66 @@ go run ./cmd/main.go --config /path/to/config.json
 - publish a generic delivery request to RabbitMQ.
 
 Actual provider orchestration is handled by a separate `message-delivery` service.
+
+### Verification tokens
+
+Verification endpoints use Bearer tokens, but the token type depends on the flow.
+
+| Flow | Token |
+|---|---|
+| Registration verification | `registration_token` returned by `/auth/register`. |
+| Authenticated email/phone verification | Normal session token returned by `/auth/login`. |
+| Password reset request | No Bearer token. The endpoint intentionally avoids account enumeration. |
+| 2FA login verify | No Bearer token. The user is not fully authenticated yet. |
+
+`registration_token` is a short-lived session with `auth_type=registration`. It exists only to authenticate verification calls after registration. The client must send it as:
+
+```http
+Authorization: Bearer <registration_token>
+```
+
+The same header format is used for normal session tokens after login.
+
+### Registration verification flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant A as auth-service
+    participant DB as PostgreSQL
+    participant MQ as RabbitMQ
+    participant D as message-delivery
+    participant P as Provider
+
+    C->>A: POST /auth/register<br/>login, password, role, device_uid
+    A->>DB: create user with verify_status=registered
+    A->>DB: create short-lived registration session
+    A->>DB: store verification code in confirm_codes
+    A->>MQ: publish message.delivery.requested
+    A-->>C: 201 registration_token
+
+    MQ->>D: consume message.delivery.requested
+    D->>D: render auth_verification_code
+    D->>P: send through configured provider chain
+    D->>MQ: publish message.delivery.result
+
+    C->>A: POST /auth/verify/email or /auth/verify/phone<br/>Authorization: Bearer registration_token<br/>recipient, code, device_uid
+    A->>DB: check token, recipient ownership, code, TTL, attempts
+    A->>DB: mark email/phone verified and delete code
+    A-->>C: 200 verified
+
+    C->>A: POST /auth/login
+    A->>DB: create normal session
+    A-->>C: 200 session token
+```
+
+Important details:
+
+- `/auth/register` returns `registration_token`; it is not a full login session.
+- `/auth/send-code` can be called with either `registration_token` or a normal session token.
+- `/auth/verify/email` and `/auth/verify/phone` require a token so the service can check that the recipient belongs to the current user.
+- `message-delivery` never validates auth tokens. It only receives a generic delivery event and sends the message.
 
 ### Config
 
