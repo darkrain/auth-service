@@ -360,9 +360,107 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/password/reset-confirm": {
+            "post": {
+                "description": "Verifies the reset code and sets a new password. Invalidates all existing sessions.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "password-reset"
+                ],
+                "summary": "Confirm password reset",
+                "parameters": [
+                    {
+                        "description": "Login, code, device UID and new password",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.resetConfirmBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.messageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/password/reset-request": {
+            "post": {
+                "description": "Sends a one-time password reset code to the user's email or phone. Always returns 200 to avoid user enumeration.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "password-reset"
+                ],
+                "summary": "Request password reset code",
+                "parameters": [
+                    {
+                        "description": "Login and device UID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.resetRequestBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.messageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/register": {
             "post": {
-                "description": "Creates a new user account. Login can be an email address or a phone number. A verification code will be sent to the provided contact.",
+                "description": "Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls.",
                 "consumes": [
                     "application/json"
                 ],
@@ -388,7 +486,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/handler.messageResponse"
+                            "$ref": "#/definitions/handler.registerResponse"
                         }
                     },
                     "400": {
@@ -460,7 +558,12 @@ const docTemplate = `{
         },
         "/auth/verify/email": {
             "post": {
-                "description": "Verifies a user's email address using a code sent to them.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Verifies a user's email address using a code sent to them. Requires Bearer token.",
                 "consumes": [
                     "application/json"
                 ],
@@ -495,6 +598,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/handler.errorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -518,7 +633,12 @@ const docTemplate = `{
         },
         "/auth/verify/phone": {
             "post": {
-                "description": "Verifies a user's phone number using a code sent to them.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Verifies a user's phone number using a code sent to them. Requires Bearer token.",
                 "consumes": [
                     "application/json"
                 ],
@@ -549,6 +669,18 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handler.errorResponse"
                         }
@@ -596,6 +728,10 @@ const docTemplate = `{
         "handler.errorResponse": {
             "type": "object",
             "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "ERR_INVALID_REQUEST"
+                },
                 "error": {
                     "type": "string",
                     "example": "error description"
@@ -660,10 +796,6 @@ const docTemplate = `{
                     "type": "string",
                     "example": "+79001234567"
                 },
-                "role": {
-                    "type": "string",
-                    "example": "user"
-                },
                 "verify_status": {
                     "type": "string",
                     "example": "verified"
@@ -682,6 +814,14 @@ const docTemplate = `{
         "handler.registerRequest": {
             "type": "object",
             "properties": {
+                "allow_fallback": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "device_uid": {
+                    "type": "string",
+                    "example": "device-uuid-1234"
+                },
                 "login": {
                     "type": "string",
                     "example": "user@example.com"
@@ -689,15 +829,90 @@ const docTemplate = `{
                 "password": {
                     "type": "string",
                     "example": "Secret123!"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "telegram"
+                },
+                "role": {
+                    "type": "string",
+                    "example": "model"
+                }
+            }
+        },
+        "handler.registerResponse": {
+            "type": "object",
+            "properties": {
+                "expires_in": {
+                    "type": "integer",
+                    "example": 1800
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Registration successful. Please verify your email/phone."
+                },
+                "registration_token": {
+                    "type": "string",
+                    "example": "a3f2c1...hex64"
+                }
+            }
+        },
+        "handler.resetConfirmBody": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "123456"
+                },
+                "device_uid": {
+                    "type": "string",
+                    "example": "device-uuid-1234"
+                },
+                "login": {
+                    "type": "string",
+                    "example": "user@example.com"
+                },
+                "new_password": {
+                    "type": "string",
+                    "example": "NewSecret123!"
+                }
+            }
+        },
+        "handler.resetRequestBody": {
+            "type": "object",
+            "properties": {
+                "allow_fallback": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "device_uid": {
+                    "type": "string",
+                    "example": "device-uuid-1234"
+                },
+                "login": {
+                    "type": "string",
+                    "example": "user@example.com"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "telegram"
                 }
             }
         },
         "handler.sendCodeRequest": {
             "type": "object",
             "properties": {
+                "allow_fallback": {
+                    "type": "boolean",
+                    "example": true
+                },
                 "device_uid": {
                     "type": "string",
                     "example": "device-uuid-1234"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "telegram"
                 },
                 "recipient": {
                     "type": "string",

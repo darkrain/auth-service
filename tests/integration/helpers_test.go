@@ -45,6 +45,13 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(fmt.Sprintf("failed to load test config: %v", err))
 	}
+	if port := os.Getenv("AUTH_TEST_PG_PORT"); port != "" {
+		cfg.PostgreSqlPort = port
+	}
+	if port := os.Getenv("AUTH_TEST_REDIS_PORT"); port != "" {
+		cfg.RedisDatabasePort = port
+	}
+	cfg.MessageBroker.PublishMode = "disabled"
 	testCfg = cfg
 
 	// Connect to PostgreSQL

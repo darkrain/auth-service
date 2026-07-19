@@ -30,9 +30,12 @@ type login2FAResponse struct {
 }
 
 type registerRequest struct {
-	Login    string `json:"login" example:"user@example.com"`
-	Password string `json:"password" example:"Secret123!"`
-	Role     string `json:"role" example:"model"`
+	Login         string `json:"login" example:"user@example.com"`
+	Password      string `json:"password" example:"Secret123!"`
+	Role          string `json:"role" example:"model"`
+	DeviceUID     string `json:"device_uid" example:"device-uuid-1234"`
+	Provider      string `json:"provider" example:"telegram"`
+	AllowFallback bool   `json:"allow_fallback" example:"true"`
 }
 
 type messageResponse struct {
@@ -86,7 +89,10 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheC
 			switch {
 			case errors.Is(err, service.Err2FA):
 				// Send code and return 202 (userID=0 — not yet authenticated, skip ownership check)
-				_ = service.SendCode(c.Request.Context(), pool, conn, cfg, req.Login, req.DeviceUID, 0)
+				_ = service.SendCode(c.Request.Context(), pool, conn, cfg, service.SendCodeRequest{
+					Recipient: req.Login,
+					DeviceUID: req.DeviceUID,
+				})
 				c.JSON(http.StatusAccepted, gin.H{
 					"message":      "Code sent to your email/phone. Please verify.",
 					"requires_2fa": true,
@@ -219,6 +225,8 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 
 		req.Login = strings.TrimSpace(req.Login)
 		req.Password = strings.TrimSpace(req.Password)
+		req.DeviceUID = strings.TrimSpace(req.DeviceUID)
+		req.Provider = strings.TrimSpace(req.Provider)
 
 		isEmail := strings.Contains(req.Login, "@")
 		loginType := "phone"
@@ -227,9 +235,12 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 		}
 
 		result, err := service.Register(c.Request.Context(), pool, conn, cfg, service.RegisterRequest{
-			Login:    req.Login,
-			Password: req.Password,
-			Role:     req.Role,
+			Login:         req.Login,
+			Password:      req.Password,
+			Role:          req.Role,
+			DeviceUID:     req.DeviceUID,
+			Provider:      req.Provider,
+			AllowFallback: req.AllowFallback,
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidEmail) {
@@ -257,6 +268,10 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 			}
 			if errors.Is(err, service.ErrAlreadyExists) {
 				c.JSON(http.StatusBadRequest, errResp(CodeLoginExists, "Login already registered"))
+				return
+			}
+			if errors.Is(err, service.ErrProviderNotAllowed) {
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
 				return
 			}
 			c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))

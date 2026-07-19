@@ -59,6 +59,7 @@ func Migrate(pool *pgxpool.Pool, migrationsDir string) error {
 		}
 
 		path := filepath.Join(migrationsDir, name)
+		// #nosec G304 -- migration names come from os.ReadDir(migrationsDir), not user input.
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("migrate: read %q: %w", name, err)

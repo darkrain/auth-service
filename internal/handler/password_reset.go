@@ -14,8 +14,10 @@ import (
 )
 
 type resetRequestBody struct {
-	Login     string `json:"login"      example:"user@example.com"`
-	DeviceUID string `json:"device_uid" example:"device-uuid-1234"`
+	Login         string `json:"login"          example:"user@example.com"`
+	DeviceUID     string `json:"device_uid"     example:"device-uuid-1234"`
+	Provider      string `json:"provider"       example:"telegram"`
+	AllowFallback bool   `json:"allow_fallback" example:"true"`
 }
 
 type resetConfirmBody struct {
@@ -47,10 +49,21 @@ func ResetRequest(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config,
 
 		req.Login = strings.TrimSpace(req.Login)
 		req.DeviceUID = strings.TrimSpace(req.DeviceUID)
+		req.Provider = strings.TrimSpace(req.Provider)
 
 		if req.Login == "" {
 			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "login is required"))
 			return
+		}
+		if req.Provider != "" {
+			recipientType := "phone"
+			if strings.Contains(req.Login, "@") {
+				recipientType = "email"
+			}
+			if !cfg.IsAllowedCodeProvider(recipientType, req.Provider) {
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, service.ErrProviderNotAllowed.Error()+": "+req.Provider))
+				return
+			}
 		}
 
 		ip := c.GetHeader("X-Real-IP")
@@ -59,7 +72,13 @@ func ResetRequest(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config,
 		}
 
 		// Always return 200 regardless of result (no user enumeration)
-		_ = service.RequestPasswordReset(c.Request.Context(), pool, conn, cfg, cacheClient, req.Login, req.DeviceUID, ip)
+		_ = service.RequestPasswordReset(c.Request.Context(), pool, conn, cfg, cacheClient, service.PasswordResetRequest{
+			Login:         req.Login,
+			DeviceUID:     req.DeviceUID,
+			IP:            ip,
+			Provider:      req.Provider,
+			AllowFallback: req.AllowFallback,
+		})
 
 		c.JSON(http.StatusOK, gin.H{"message": "If an account with that login exists, a reset code has been sent."})
 	}

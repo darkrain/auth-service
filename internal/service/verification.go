@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/validator"
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -28,11 +28,22 @@ var Err2FA = errors.New("2fa required")
 // ErrForbiddenRecipient is returned when the recipient does not belong to the authenticated user.
 var ErrForbiddenRecipient = errors.New("recipient does not belong to authenticated user")
 
+var ErrProviderNotAllowed = delivery.ErrProviderNotAllowed
+
+type SendCodeRequest struct {
+	Recipient     string
+	DeviceUID     string
+	UserID        int64
+	Provider      string
+	AllowFallback bool
+}
+
 // SendCode generates a 6-digit verification code and publishes it to RabbitMQ.
 // Rate-limited: if an existing code's TTL hasn't expired, returns ErrTooManyRequests.
 // userID is the authenticated user's ID; recipient must match their email or phone.
-func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, recipient, deviceUID string, userID int64) error {
-	recipient = strings.TrimSpace(recipient)
+func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, req SendCodeRequest) error {
+	recipient := strings.TrimSpace(req.Recipient)
+	deviceUID := strings.TrimSpace(req.DeviceUID)
 	if recipient == "" {
 		return fmt.Errorf("%w: recipient is required", ErrValidation)
 	}
@@ -51,9 +62,9 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	}
 
 	// HIGH-NEW-1: verify that the recipient belongs to the authenticated user
-	if pool != nil && userID > 0 {
+	if pool != nil && req.UserID > 0 {
 		var dbEmail, dbPhone sql.NullString
-		err := pool.QueryRow(ctx, "SELECT email, phone FROM users WHERE id=$1", userID).Scan(&dbEmail, &dbPhone)
+		err := pool.QueryRow(ctx, "SELECT email, phone FROM users WHERE id=$1", req.UserID).Scan(&dbEmail, &dbPhone)
 		if err != nil {
 			return ErrForbidden
 		}
@@ -137,68 +148,28 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 		}
 	}
 
-	// Skip RabbitMQ publish for test accounts
-	if testCode != "" {
+	// Skip broker publish for test accounts unless explicitly enabled.
+	if testCode != "" && !cfg.CodeDelivery.PublishTestAccountCodes {
 		return nil
 	}
 
-	// Publish event to RabbitMQ
-	if conn != nil {
-		eventType := "phone_verification"
-		if isEmail {
-			eventType = "email_verification"
-		}
-
-		type verificationEvent struct {
-			Type      string `json:"type"`
-			Recipient string `json:"recipient"`
-			Code      string `json:"code"`
-			UserID    int64  `json:"user_id"`
-		}
-
-		payload, err := json.Marshal(verificationEvent{
-			Type:      eventType,
-			Recipient: recipient,
-			Code:      code,
-			UserID:    recipientUserID,
-		})
-		if err != nil {
-			return fmt.Errorf("json: marshal event: %w", err)
-		}
-
-		ch, err := conn.Channel()
-		if err != nil {
-			return fmt.Errorf("broker: open channel: %w", err)
-		}
-		defer ch.Close()
-
-		if err := ch.ExchangeDeclare(
-			cfg.RmqExchangeName,
-			cfg.RmqExchangeKind,
-			true,
-			false,
-			false,
-			false,
-			nil,
-		); err != nil {
-			return fmt.Errorf("broker: declare exchange: %w", err)
-		}
-
-		if err := ch.PublishWithContext(ctx,
-			cfg.RmqExchangeName,
-			cfg.RmqQueueMailName,
-			false,
-			false,
-			amqp.Publishing{
-				ContentType: "application/json",
-				Body:        payload,
-			},
-		); err != nil {
-			return fmt.Errorf("broker: publish: %w", err)
-		}
+	recipientType := delivery.RecipientTypePhone
+	if isEmail {
+		recipientType = delivery.RecipientTypeEmail
 	}
 
-	return nil
+	return delivery.PublishCode(ctx, conn, cfg, delivery.CodeRequest{
+		Template:         delivery.TemplateAuthVerificationCode,
+		Purpose:          delivery.PurposeVerification,
+		RecipientType:    recipientType,
+		Recipient:        recipient,
+		Code:             code,
+		TTLSec:           cfg.RateLimit.Code.TTLSec,
+		UserID:           recipientUserID,
+		DeviceUID:        deviceUID,
+		SelectedProvider: strings.TrimSpace(req.Provider),
+		AllowFallback:    req.AllowFallback,
+	})
 }
 
 // VerifyCode checks a verification code for the given recipient+deviceUID.

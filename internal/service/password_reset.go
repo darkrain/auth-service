@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
@@ -29,6 +29,14 @@ var ErrWeakPassword = errors.New("password does not meet requirements")
 
 const authTypePasswordReset = "password_reset"
 
+type PasswordResetRequest struct {
+	Login         string
+	DeviceUID     string
+	IP            string
+	Provider      string
+	AllowFallback bool
+}
+
 // RequestPasswordReset sends a password reset code to the user.
 // Always returns nil regardless of whether the user exists (no enumeration).
 // Rate-limited per IP and per login via Redis.
@@ -38,17 +46,18 @@ func RequestPasswordReset(
 	conn *amqp.Connection,
 	cfg *config.Config,
 	cacheClient *cache.Client,
-	login, deviceUID, ip string,
+	req PasswordResetRequest,
 ) error {
-	login = strings.TrimSpace(login)
+	login := strings.TrimSpace(req.Login)
+	deviceUID := strings.TrimSpace(req.DeviceUID)
 	if login == "" {
 		// Silently ignore — no enumeration
 		return nil
 	}
 
 	// Rate limit by IP
-	if cacheClient != nil && cfg.PasswordResetRateLimitPerHour > 0 && ip != "" {
-		ipKey := fmt.Sprintf("rate:password_reset:%s", ip)
+	if cacheClient != nil && cfg.PasswordResetRateLimitPerHour > 0 && req.IP != "" {
+		ipKey := fmt.Sprintf("rate:password_reset:%s", req.IP)
 		count, err := cacheClient.SlidingWindowIncr(ctx, ipKey, 3600)
 		if err == nil && count > int64(cfg.PasswordResetRateLimitPerHour) {
 			// Exceeded — silently return nil (no enumeration for reset-request)
@@ -127,60 +136,28 @@ func RequestPasswordReset(
 		return fmt.Errorf("db: upsert confirm_codes: %w", upsertErr)
 	}
 
-	// Skip RabbitMQ for test accounts
-	if testCode != "" {
+	// Skip broker publish for test accounts unless explicitly enabled.
+	if testCode != "" && !cfg.CodeDelivery.PublishTestAccountCodes {
 		return nil
 	}
 
-	// Publish password_reset event to RabbitMQ
-	if conn != nil {
-		type resetEvent struct {
-			Type      string `json:"type"`
-			Recipient string `json:"recipient"`
-			Code      string `json:"code"`
-			UserID    int64  `json:"user_id"`
-			TTLSec    int    `json:"ttl_sec"`
-		}
-
-		payload, err := json.Marshal(resetEvent{
-			Type:      "password_reset",
-			Recipient: login,
-			Code:      code,
-			UserID:    userID,
-			TTLSec:    ttlSec,
-		})
-		if err != nil {
-			return fmt.Errorf("json: marshal event: %w", err)
-		}
-
-		ch, err := conn.Channel()
-		if err != nil {
-			return fmt.Errorf("broker: open channel: %w", err)
-		}
-		defer ch.Close()
-
-		if err := ch.ExchangeDeclare(
-			cfg.RmqExchangeName,
-			cfg.RmqExchangeKind,
-			true, false, false, false, nil,
-		); err != nil {
-			return fmt.Errorf("broker: declare exchange: %w", err)
-		}
-
-		if err := ch.PublishWithContext(ctx,
-			cfg.RmqExchangeName,
-			cfg.RmqQueueMailName,
-			false, false,
-			amqp.Publishing{
-				ContentType: "application/json",
-				Body:        payload,
-			},
-		); err != nil {
-			return fmt.Errorf("broker: publish: %w", err)
-		}
+	recipientType := delivery.RecipientTypePhone
+	if isEmail {
+		recipientType = delivery.RecipientTypeEmail
 	}
 
-	return nil
+	return delivery.PublishCode(ctx, conn, cfg, delivery.CodeRequest{
+		Template:         delivery.TemplateAuthPasswordReset,
+		Purpose:          delivery.PurposePasswordReset,
+		RecipientType:    recipientType,
+		Recipient:        login,
+		Code:             code,
+		TTLSec:           ttlSec,
+		UserID:           userID,
+		DeviceUID:        deviceUID,
+		SelectedProvider: strings.TrimSpace(req.Provider),
+		AllowFallback:    req.AllowFallback,
+	})
 }
 
 // ConfirmPasswordReset verifies the reset code, updates the password, and invalidates all sessions.

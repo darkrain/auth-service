@@ -232,6 +232,43 @@ func TestSendCode_InvalidEmail(t *testing.T) {
 	}
 }
 
+func TestSendCode_SelectedProvider(t *testing.T) {
+	truncateTables(t)
+
+	login := "provider-select@example.com"
+	token := registerUser(t, login, "Password1")
+
+	w := doRequest("POST", "/auth/send-code", map[string]interface{}{
+		"recipient":      login,
+		"device_uid":     "device-provider-select",
+		"provider":       "email",
+		"allow_fallback": false,
+	}, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for selected email provider, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSendCode_DisallowedProvider(t *testing.T) {
+	truncateTables(t)
+
+	login := "provider-invalid@example.com"
+	token := registerUser(t, login, "Password1")
+
+	w := doRequest("POST", "/auth/send-code", map[string]interface{}{
+		"recipient":  login,
+		"device_uid": "device-provider-invalid",
+		"provider":   "telegram",
+	}, token)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid email provider, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if body["code"] != "ERR_INVALID_REQUEST" {
+		t.Fatalf("expected ERR_INVALID_REQUEST, got %#v", body)
+	}
+}
+
 func TestSendCode_InvalidPhone(t *testing.T) {
 	truncateTables(t)
 

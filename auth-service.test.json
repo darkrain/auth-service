@@ -1,0 +1,80 @@
+{
+  "Host": "localhost",
+  "Port": "8081",
+  "PasswordSalt": "test_salt",
+  "PasswordMinLength": 6,
+  "PasswordRequireDigits": true,
+  "PasswordRequireSpecial": false,
+  "SystemUserEmail": "system@test.internal",
+  "SystemUserPassword": "System123",
+  "PostgreSqlHost": "localhost",
+  "PostgreSqlPort": "5433",
+  "PostgreSqlUserName": "auth",
+  "PostgreSqlPassword": "auth",
+  "PostgreSqlDatabase": "auth_test",
+  "RedisDatabaseNetwork": "tcp",
+  "RedisDatabaseHost": "localhost",
+  "RedisDatabasePort": "6380",
+  "MessageBroker": {
+    "Host": "localhost:5672",
+    "User": "guest",
+    "Password": "guest",
+    "ExchangeName": "messages.events",
+    "ExchangeKind": "topic",
+    "PublishMode": "disabled",
+    "RoutingKeys": {
+      "DeliveryRequested": "message.delivery.requested"
+    }
+  },
+  "CodeDelivery": {
+    "Email": {
+      "DefaultProvider": "email",
+      "AllowedProviders": ["email"]
+    },
+    "Phone": {
+      "DefaultProviderChain": ["telegram", "sms"],
+      "AllowedProviders": ["telegram", "sms"]
+    },
+    "PublishTestAccountCodes": false
+  },
+  "SessionTTLDays": 1,
+  "RegistrationTokenTTLMin": 30,
+  "TwoFactorEnabled": false,
+  "PasswordResetCodeTTLMin": 15,
+  "PasswordResetRateLimitPerHour": 100,
+  "TrustedProxies": ["127.0.0.1"],
+  "AllowedOrigins": ["http://localhost:3000"],
+  "PostgreSQLSSLMode": "disable",
+  "SwaggerEnabled": false,
+  "TestAccounts": [
+    {"login": "testaccount@example.com", "code": "111111"},
+    {"login": "reset-test@example.com", "code": "777777"}
+  ],
+  "AllowedRoles": ["model", "manager", "agency", "client", "support"],
+  "RateLimit": {
+    "IP": {
+      "LoginMaxAttempts": 100,
+      "LoginWindowSec": 60,
+      "RegisterMaxAttempts": 100,
+      "RegisterWindowSec": 60,
+      "SendCodeMaxAttempts": 100,
+      "SendCodeWindowSec": 60
+    },
+    "Device": {
+      "LoginMaxAttempts": 100,
+      "LoginWindowSec": 60,
+      "SendCodeMaxAttempts": 100,
+      "SendCodeWindowSec": 60,
+      "RegisterMaxAttempts": 100,
+      "RegisterWindowSec": 60
+    },
+    "Account": {
+      "MaxFailedLogins": 100,
+      "LockDurationSec": 60
+    },
+    "Code": {
+      "MaxAttempts": 10,
+      "TTLSec": 300
+    }
+  }
+}

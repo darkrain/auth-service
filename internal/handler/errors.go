@@ -7,7 +7,7 @@ const (
 	CodeInvalidRequest     = "ERR_INVALID_REQUEST"
 	CodeInvalidEmail       = "ERR_INVALID_EMAIL"
 	CodeInvalidPhone       = "ERR_INVALID_PHONE"
-	CodeInvalidCredentials = "ERR_INVALID_CREDENTIALS"
+	CodeInvalidCredentials = "ERR_INVALID_CREDENTIALS" // #nosec G101 -- public API error code, not a credential.
 	CodeUserNotFound       = "ERR_USER_NOT_FOUND"
 	CodeLoginExists        = "ERR_LOGIN_EXISTS"
 	CodeNotVerified        = "ERR_NOT_VERIFIED"
@@ -29,7 +29,7 @@ const (
 	CodeRegistrationToken  = "ERR_REGISTRATION_TOKEN"
 	CodeInvalidCode        = "ERR_INVALID_CODE"
 	CodeCodeExpired        = "ERR_CODE_EXPIRED"
-	CodeWeakPassword       = "ERR_WEAK_PASSWORD"
+	CodeWeakPassword       = "ERR_WEAK_PASSWORD" // #nosec G101 -- public API error code, not a password.
 )
 
 // errResp returns a gin.H with error message and code

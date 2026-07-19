@@ -5,15 +5,16 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/validator"
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -303,9 +304,12 @@ func Logout(ctx context.Context, pool *pgxpool.Pool, cacheClient *cache.Client, 
 
 // RegisterRequest holds the registration input.
 type RegisterRequest struct {
-	Login    string
-	Password string
-	Role     string
+	Login         string
+	Password      string
+	Role          string
+	DeviceUID     string
+	Provider      string
+	AllowFallback bool
 }
 
 // RegisterResult holds the result of a successful registration.
@@ -428,64 +432,75 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 		}
 	}
 
-	// 7. Publish verification event to RabbitMQ (best-effort; ignore if broker unavailable)
-	if conn != nil {
-		eventType := "phone_verification"
-		if isEmail {
-			eventType = "email_verification"
+	testCode := ""
+	for _, ta := range cfg.TestAccounts {
+		if strings.EqualFold(ta.Login, req.Login) {
+			testCode = ta.Code
+			break
 		}
+	}
 
-		type verificationEvent struct {
-			Type      string `json:"type"`
-			Recipient string `json:"recipient"`
-			UserID    int64  `json:"user_id"`
-		}
-
-		payload, err := json.Marshal(verificationEvent{
-			Type:      eventType,
-			Recipient: req.Login,
-			UserID:    userID,
-		})
+	code := testCode
+	if code == "" {
+		var err error
+		code, err = generateCode()
 		if err != nil {
-			return nil, fmt.Errorf("json: marshal event: %w", err)
+			return nil, err
 		}
-
-		ch, err := conn.Channel()
+	}
+	deviceUID := strings.TrimSpace(req.DeviceUID)
+	now := time.Now()
+	if pool != nil {
+		_, err := pool.Exec(ctx,
+			`INSERT INTO confirm_codes (device_uid, recipient, code, counter, sent_ts, auth_type)
+			 VALUES ($1, $2, $3, 0, $4, 'verification')
+			 ON CONFLICT (device_uid, recipient, auth_type) DO UPDATE
+			 SET code = EXCLUDED.code, counter = 0, sent_ts = EXCLUDED.sent_ts`,
+			deviceUID, req.Login, code, now,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("broker: open channel: %w", err)
+			return nil, fmt.Errorf("db: upsert confirm_codes: %w", err)
 		}
-		defer ch.Close()
+	}
 
-		if err := ch.ExchangeDeclare(
-			cfg.RmqExchangeName,
-			cfg.RmqExchangeKind,
-			true,  // durable
-			false, // auto-delete
-			false, // internal
-			false, // no-wait
-			nil,
-		); err != nil {
-			return nil, fmt.Errorf("broker: declare exchange: %w", err)
-		}
+	if testCode != "" && !cfg.CodeDelivery.PublishTestAccountCodes {
+		return &RegisterResult{
+			RegistrationToken: registrationToken,
+			ExpiresIn:         expiresIn,
+		}, nil
+	}
 
-		if err := ch.PublishWithContext(ctx,
-			cfg.RmqExchangeName,
-			cfg.RmqQueueMailName,
-			false,
-			false,
-			amqp.Publishing{
-				ContentType: "application/json",
-				Body:        payload,
-			},
-		); err != nil {
-			return nil, fmt.Errorf("broker: publish: %w", err)
-		}
+	recipientType := delivery.RecipientTypePhone
+	if isEmail {
+		recipientType = delivery.RecipientTypeEmail
+	}
+	if err := delivery.PublishCode(ctx, conn, cfg, delivery.CodeRequest{
+		Template:         delivery.TemplateAuthVerificationCode,
+		Purpose:          delivery.PurposeRegistrationVerification,
+		RecipientType:    recipientType,
+		Recipient:        req.Login,
+		Code:             code,
+		TTLSec:           cfg.RateLimit.Code.TTLSec,
+		UserID:           userID,
+		DeviceUID:        deviceUID,
+		SelectedProvider: strings.TrimSpace(req.Provider),
+		AllowFallback:    req.AllowFallback,
+	}); err != nil {
+		return nil, err
 	}
 
 	return &RegisterResult{
 		RegistrationToken: registrationToken,
 		ExpiresIn:         expiresIn,
 	}, nil
+}
+
+func generateCode() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return "", fmt.Errorf("crypto/rand: %w", err)
+	}
+	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
 // validatePassword checks password complexity against config rules.

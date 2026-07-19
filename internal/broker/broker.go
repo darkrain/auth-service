@@ -2,22 +2,23 @@ package broker
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/darkrain/auth-service/internal/config"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func Connect(cfg *config.Config) (*amqp.Connection, error) {
-	url := fmt.Sprintf("amqp://%s:%s@%s/",
-		cfg.RmqUser,
-		cfg.RmqPassword,
-		cfg.RmqHost,
-	)
+	brokerURL := url.URL{
+		Scheme: "amqp",
+		User:   url.UserPassword(cfg.MessageBroker.User, cfg.MessageBroker.Password),
+		Host:   cfg.MessageBroker.Host,
+		Path:   "/",
+	}
 
-	conn, err := amqp.Dial(url)
+	conn, err := amqp.Dial(brokerURL.String())
 	if err != nil {
-		// LOW: redact password from URL before logging — only log host
-		return nil, fmt.Errorf("broker: dial %s: %w", cfg.RmqHost, err)
+		return nil, fmt.Errorf("broker: dial %s: %w", cfg.MessageBroker.Host, err)
 	}
 
 	return conn, nil

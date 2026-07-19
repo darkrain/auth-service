@@ -1,6 +1,6 @@
 # auth-service
 
-A lightweight authentication and authorization microservice built with Go and Gin. Supports JWT session tokens, email/phone 2FA, API key management, rate limiting, and RabbitMQ-based notification delivery.
+A lightweight authentication and authorization microservice built with Go and Gin. Supports JWT session tokens, email/phone 2FA, API key management, rate limiting, and RabbitMQ-based message delivery requests.
 
 ## Features
 
@@ -10,7 +10,7 @@ A lightweight authentication and authorization microservice built with Go and Gi
 - API key management (admin/system roles)
 - Redis-backed rate limiting and session cache
 - PostgreSQL for persistent storage with auto-migrations
-- RabbitMQ integration for sending verification emails/SMS
+- RabbitMQ producer for generic `message.delivery.requested` events
 - Swagger/OpenAPI documentation
 
 ## API Endpoints
@@ -21,9 +21,9 @@ A lightweight authentication and authorization microservice built with Go and Gi
 | POST | `/auth/register` | — | Register a new user |
 | POST | `/auth/login` | — | Login with email/phone + password |
 | POST | `/auth/logout` | Bearer | Logout and invalidate token |
-| POST | `/auth/send-code` | — | Send verification code |
-| POST | `/auth/verify/email` | — | Verify email address |
-| POST | `/auth/verify/phone` | — | Verify phone number |
+| POST | `/auth/send-code` | Bearer | Send verification code |
+| POST | `/auth/verify/email` | Bearer | Verify email address |
+| POST | `/auth/verify/phone` | Bearer | Verify phone number |
 | POST | `/auth/login/verify-2fa` | — | Complete 2FA login |
 | GET | `/auth/me` | Bearer | Get current user info |
 | POST | `/auth/api-keys` | Bearer + admin/system | Create API key |
@@ -62,6 +62,121 @@ To use a custom config:
 ```bash
 go run ./cmd/main.go --config /path/to/config.json
 ```
+
+## Message Delivery
+
+`auth-service` does not send email, Telegram, WhatsApp or SMS messages directly. Its responsibility is to prove that a user controls an email address or phone number:
+
+- validate auth request;
+- generate and store verification/reset code;
+- apply TTL/rate-limit/attempt rules;
+- publish a generic delivery request to RabbitMQ.
+
+Actual provider orchestration is handled by a separate `message-delivery` service.
+
+### Config
+
+```json
+{
+  "MessageBroker": {
+    "Host": "localhost:5672",
+    "User": "guest",
+    "Password": "guest",
+    "ExchangeName": "messages.events",
+    "ExchangeKind": "topic",
+    "PublishMode": "required",
+    "RoutingKeys": {
+      "DeliveryRequested": "message.delivery.requested"
+    }
+  },
+  "CodeDelivery": {
+    "Email": {
+      "DefaultProvider": "email",
+      "AllowedProviders": ["email"]
+    },
+    "Phone": {
+      "DefaultProviderChain": ["telegram", "sms"],
+      "AllowedProviders": ["telegram", "sms"]
+    },
+    "PublishTestAccountCodes": false
+  }
+}
+```
+
+`PublishMode`:
+
+| Mode | Behavior |
+|---|---|
+| `required` | If RabbitMQ publish fails, the auth flow returns an error. This is the production-safe default. |
+| `best_effort` | Code is saved even if publish fails; the request may still succeed. Useful for local development. |
+| `disabled` | Delivery events are not published. Useful for tests. |
+
+`auth-service` config contains only provider aliases and policy. Provider secrets and adapter settings live in `message-delivery`.
+
+Currently expected provider aliases:
+
+| Recipient type | Aliases |
+|---|---|
+| `email` | `email` |
+| `phone` | `telegram`, `sms` |
+
+Do not add `whatsapp`, `twilio` or other aliases to `AllowedProviders` until `message-delivery` implements matching adapters and the deployment config enables them.
+
+### User-selected provider
+
+`/auth/register`, `/auth/send-code` and `/auth/password/reset-request` accept optional delivery fields:
+
+```json
+{
+  "recipient": "+10000000000",
+  "device_uid": "device-1",
+  "provider": "telegram",
+  "allow_fallback": true
+}
+```
+
+For `/auth/register`, use `login` instead of `recipient`.
+
+If `provider` is empty, `auth-service` sends the configured provider chain. If `provider` is set, it is validated against `CodeDelivery.*.AllowedProviders` and becomes `delivery.selected_provider`.
+
+### Event contract
+
+Published event:
+
+```json
+{
+  "version": "v1",
+  "event_id": "random-hex-id",
+  "type": "message.delivery.requested",
+  "source": "auth-service",
+  "template": "auth_verification_code",
+  "purpose": "registration_verification",
+  "recipient_type": "phone",
+  "recipient": "+10000000000",
+  "variables": {
+    "code": "123456",
+    "ttl_sec": "300"
+  },
+  "user_id": 123,
+  "created_at": "2026-07-19T00:00:00Z",
+  "delivery": {
+    "selected_provider": "telegram",
+    "provider_chain": ["telegram", "sms"],
+    "allow_fallback": true
+  },
+  "metadata": {
+    "device_uid": "device-1"
+  }
+}
+```
+
+Templates used by auth flows:
+
+| Flow | Template | Purpose |
+|---|---|---|
+| Register | `auth_verification_code` | `registration_verification` |
+| Send code | `auth_verification_code` | `verification` |
+| Password reset | `auth_password_reset` | `password_reset` |
 
 ## Testing
 

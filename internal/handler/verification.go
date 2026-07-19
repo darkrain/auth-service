@@ -14,8 +14,10 @@ import (
 )
 
 type sendCodeRequest struct {
-	Recipient string `json:"recipient" example:"user@example.com"`
-	DeviceUID string `json:"device_uid" example:"device-uuid-1234"`
+	Recipient     string `json:"recipient" example:"user@example.com"`
+	DeviceUID     string `json:"device_uid" example:"device-uuid-1234"`
+	Provider      string `json:"provider" example:"telegram"`
+	AllowFallback bool   `json:"allow_fallback" example:"true"`
 }
 
 type verifyCodeRequest struct {
@@ -53,6 +55,7 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 
 		req.Recipient = strings.TrimSpace(req.Recipient)
 		req.DeviceUID = strings.TrimSpace(req.DeviceUID)
+		req.Provider = strings.TrimSpace(req.Provider)
 
 		if req.Recipient == "" {
 			c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, "recipient is required"))
@@ -70,7 +73,13 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 			}
 		}
 
-		err := service.SendCode(c.Request.Context(), pool, conn, cfg, req.Recipient, req.DeviceUID, userID)
+		err := service.SendCode(c.Request.Context(), pool, conn, cfg, service.SendCodeRequest{
+			Recipient:     req.Recipient,
+			DeviceUID:     req.DeviceUID,
+			UserID:        userID,
+			Provider:      req.Provider,
+			AllowFallback: req.AllowFallback,
+		})
 		if err != nil {
 			switch {
 			case errors.Is(err, service.ErrInvalidEmail):
@@ -85,6 +94,8 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 				c.JSON(http.StatusForbidden, errResp(CodeRecipientMismatch, err.Error()))
 			case errors.Is(err, service.ErrForbidden):
 				c.JSON(http.StatusForbidden, errResp(CodeForbidden, "forbidden"))
+			case errors.Is(err, service.ErrProviderNotAllowed):
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
 			default:
 				c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))
 			}
