@@ -1,0 +1,57 @@
+{
+  "contact_verifications": {
+    "label": "Contact verification",
+    "fields": {
+      "id": "ID",
+      "creation_date": "Created",
+      "update_date": "Updated",
+      "user_id": "User",
+      "contact_type": "Contact type",
+      "recipient": "Contact",
+      "device_uid": "Device",
+      "provider": "Delivery provider",
+      "allow_fallback": "Allow fallback",
+      "status": "Status",
+      "code": "Code",
+      "counter": "Attempts",
+      "sent_ts": "Sent at",
+      "expires_at": "Expires at",
+      "confirmed_at": "Confirmed at"
+    },
+    "options": {
+      "status": {
+        "pending": "Pending",
+        "confirmed": "Confirmed",
+        "cancelled": "Cancelled",
+        "expired": "Expired"
+      },
+      "contact_type": {
+        "email": "Email",
+        "phone": "Phone"
+      }
+    },
+    "actions": {
+      "list": "Contact verification requests",
+      "view": "View request",
+      "add": "Verify contact",
+      "update": "Confirm code",
+      "delete": "Delete request",
+      "defrec": "Contact verification form"
+    },
+    "pages": {
+      "list": {
+        "title": "Contact verification",
+        "subtitle": "Email and phone ownership checks for your account."
+      },
+      "form": {
+        "title": "Verify contact",
+        "subtitle": "Enter a new email or phone number and confirm the code."
+      }
+    },
+    "sections": {
+      "contact": "Contact",
+      "confirm": "Confirmation",
+      "audit": "Audit"
+    }
+  }
+}

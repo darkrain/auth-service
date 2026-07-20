@@ -42,6 +42,7 @@ import (
 	rg "github.com/darkrain/request-generator"
 	rgactions "github.com/darkrain/request-generator/actions"
 	rgdb "github.com/darkrain/request-generator/db"
+	"github.com/darkrain/request-generator/locale"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	swaggerFiles "github.com/swaggo/files"
@@ -248,6 +249,14 @@ func main() {
 				return middleware.Auth(pgPool, cacheClient)
 			},
 		)
+		generator.Locales = []locale.Lang{locale.EN, locale.RU}
+		generator.DefaultLocale = locale.EN
+		if err := generator.LoadTranslationsFile(locale.EN, "locales/en.json"); err != nil {
+			log.Printf("WARNING: failed to load en translations: %v", err)
+		}
+		if err := generator.LoadTranslationsFile(locale.RU, "locales/ru.json"); err != nil {
+			log.Printf("WARNING: failed to load ru translations: %v", err)
+		}
 		generator.Run()
 	}
 

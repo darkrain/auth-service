@@ -22,6 +22,7 @@ import (
 	rg "github.com/darkrain/request-generator"
 	rgactions "github.com/darkrain/request-generator/actions"
 	rgdb "github.com/darkrain/request-generator/db"
+	"github.com/darkrain/request-generator/locale"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -154,6 +155,14 @@ func TestMain(m *testing.M) {
 			return middleware.Auth(pool, testCache)
 		},
 	)
+	generator.Locales = []locale.Lang{locale.EN, locale.RU}
+	generator.DefaultLocale = locale.EN
+	if err := generator.LoadTranslationsFile(locale.EN, filepath.Join(repoRoot(), "locales", "en.json")); err != nil {
+		panic(fmt.Sprintf("failed to load en translations: %v", err))
+	}
+	if err := generator.LoadTranslationsFile(locale.RU, filepath.Join(repoRoot(), "locales", "ru.json")); err != nil {
+		panic(fmt.Sprintf("failed to load ru translations: %v", err))
+	}
 	generator.Run()
 
 	testRouter = r

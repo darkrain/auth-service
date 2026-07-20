@@ -11,7 +11,7 @@ func TestContactVerifications_Defrec(t *testing.T) {
 	truncateTables(t)
 	token := verifiedLoginToken(t, "cv-defrec@example.com")
 
-	w := doRequest("GET", "/auth/contact_verifications/defrec/", nil, token)
+	w := doRequest("GET", "/auth/contact_verifications/defrec/?lang=ru", nil, token)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -30,6 +30,37 @@ func TestContactVerifications_Defrec(t *testing.T) {
 	context, ok := formPage["context"].(map[string]interface{})
 	if !ok || context["field_flow"] == nil {
 		t.Fatalf("expected field_flow metadata in form_page context: %s", w.Body.String())
+	}
+	fields, ok := body["fields"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected fields map in defrec response: %s", w.Body.String())
+	}
+	recipient, ok := fields["recipient"].(map[string]interface{})
+	if !ok || recipient["title"] != "Контакт" {
+		t.Fatalf("expected localized recipient title, got: %v", recipient)
+	}
+	contactType, ok := fields["contact_type"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected contact_type field in defrec response: %s", w.Body.String())
+	}
+	options, ok := contactType["options"].([]interface{})
+	if !ok || len(options) == 0 {
+		t.Fatalf("expected localized contact_type options, got: %v", contactType["options"])
+	}
+	firstOption, ok := options[0].(map[string]interface{})
+	if !ok || firstOption["label"] != "Email" {
+		t.Fatalf("expected localized contact_type option, got: %v", options[0])
+	}
+}
+
+func TestContactVerifications_TranslationsEndpoint(t *testing.T) {
+	w := doRequest("GET", "/api/lang/ru", nil, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := parseJSON(w)
+	if body["contact_verifications.pages.form.title"] != "Подтвердить контакт" {
+		t.Fatalf("expected auth-service contact verification translation, got: %v", body["contact_verifications.pages.form.title"])
 	}
 }
 
