@@ -3,7 +3,9 @@ module github.com/darkrain/auth-service
 go 1.26.2
 
 require (
+	github.com/darkrain/request-generator v0.0.0-20260720003805-801d025a879d
 	github.com/gin-gonic/gin v1.12.0
+	github.com/go-jet/jet/v2 v2.12.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.20.1
@@ -23,11 +25,9 @@ require (
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/darkrain/request-generator v0.0.0-20260710220005-160509b5e96f // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
-	github.com/go-jet/jet/v2 v2.12.0 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/go-openapi/jsonreference v0.19.6 // indirect
 	github.com/go-openapi/spec v0.20.4 // indirect

@@ -19,9 +19,17 @@ func TestContactVerifications_Defrec(t *testing.T) {
 	if body["fields"] == nil {
 		t.Fatalf("expected fields in defrec response: %s", w.Body.String())
 	}
-	extra, ok := body["extra"].(map[string]interface{})
-	if !ok || extra["field_flow"] == nil {
-		t.Fatalf("expected field_flow metadata in defrec extra: %s", w.Body.String())
+	rendererInfo, ok := body["renderer"].(map[string]interface{})
+	if !ok || rendererInfo["name"] != "UniversalRenderer" {
+		t.Fatalf("expected UniversalRenderer identity in defrec response: %s", w.Body.String())
+	}
+	formPage, ok := body["form_page"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected form_page in defrec response: %s", w.Body.String())
+	}
+	context, ok := formPage["context"].(map[string]interface{})
+	if !ok || context["field_flow"] == nil {
+		t.Fatalf("expected field_flow metadata in form_page context: %s", w.Body.String())
 	}
 }
 

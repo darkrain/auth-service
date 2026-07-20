@@ -153,7 +153,7 @@ The module uses standard request-generator CRUD actions:
 
 | CRUD action | Meaning in this module |
 |---|---|
-| `defrec` | Returns universal renderer metadata, including `field_flow.type=verified_contact` and `module_ref.namespace=auth-service`. |
+| `defrec` | Returns canonical UniversalRenderer metadata: `renderer`, `form_page`, and `form_page.context.field_flow` with `module_ref.namespace=auth-service`. |
 | `add` | Creates a pending verification request and publishes an auth code through `message-delivery`. |
 | `update` | Confirms the code and updates the authenticated user's email or phone. |
 | `list/view` | Returns the user's verification request history/status. |
@@ -172,7 +172,7 @@ sequenceDiagram
     participant D as message-delivery
 
     W->>A: GET /auth/contact_verifications/defrec/
-    A-->>W: fields + extra.field_flow + module_ref
+    A-->>W: renderer + form_page.context.field_flow + fields
     W->>A: PUT /auth/contact_verifications<br/>contact_type, recipient, device_uid, provider
     A->>DB: validate current user and create pending request
     A->>MQ: publish message.delivery.requested

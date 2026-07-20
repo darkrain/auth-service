@@ -21,6 +21,7 @@ import (
 	"github.com/darkrain/request-generator/actions"
 	"github.com/darkrain/request-generator/fields"
 	"github.com/darkrain/request-generator/icontext"
+	"github.com/darkrain/request-generator/renderer"
 	"github.com/gin-gonic/gin"
 	pg "github.com/go-jet/jet/v2/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -92,21 +93,21 @@ func ContactVerificationsModule(pool *pgxpool.Pool, conn *amqp.Connection, cfg *
 	}
 
 	moduleFields := []fields.ModuleField{
-		{Column: t.ID, Title: "contact_verifications.fields.id", Type: fields.ModuleFieldTypeInt, FormType: fields.ModuleFieldFormTypeHidden},
-		{Column: t.CreationDate, Title: "contact_verifications.fields.creation_date", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView},
-		{Column: t.UpdateDate, Title: "contact_verifications.fields.update_date", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView},
+		{Column: t.ID, Title: "contact_verifications.fields.id", Type: fields.ModuleFieldTypeInt, FormType: fields.ModuleFieldFormTypeHidden, Extra: displayExtra("code")},
+		{Column: t.CreationDate, Title: "contact_verifications.fields.creation_date", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView, Extra: displayExtra("date")},
+		{Column: t.UpdateDate, Title: "contact_verifications.fields.update_date", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView, Extra: displayExtra("date")},
 		{Column: t.UserID, Title: "contact_verifications.fields.user_id", Type: fields.ModuleFieldTypeInt, FormType: fields.ModuleFieldFormTypeHidden},
 		{Column: t.ContactType, Title: "contact_verifications.fields.contact_type", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeSelect, Options: typeOptions, Check: []fields.CheckRules{fields.RequiredRule(t.ContactType, []fields.Scenario{fields.ScenarioAdd})}},
 		{Column: t.Recipient, Title: "contact_verifications.fields.recipient", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeText, Check: []fields.CheckRules{fields.RequiredRule(t.Recipient, []fields.Scenario{fields.ScenarioAdd})}},
 		{Column: t.DeviceUID, Title: "contact_verifications.fields.device_uid", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeText, Check: []fields.CheckRules{fields.RequiredRule(t.DeviceUID, []fields.Scenario{fields.ScenarioAdd})}},
 		{Column: t.Provider, Title: "contact_verifications.fields.provider", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeText},
-		{Column: t.AllowFallback, Title: "contact_verifications.fields.allow_fallback", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeCheckBox},
-		{Column: t.Status, Title: "contact_verifications.fields.status", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeSelect, Options: statusOptions},
+		{Column: t.AllowFallback, Title: "contact_verifications.fields.allow_fallback", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeCheckBox, Extra: displayExtra("boolean")},
+		{Column: t.Status, Title: "contact_verifications.fields.status", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeSelect, Options: statusOptions, Extra: displayExtra("badge")},
 		{Column: t.Code, Title: "contact_verifications.fields.code", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeHidden},
 		{Column: t.Counter, Title: "contact_verifications.fields.counter", Type: fields.ModuleFieldTypeInt, FormType: fields.ModuleFieldFormTypeOnlyView},
-		{Column: t.SentTS, Title: "contact_verifications.fields.sent_ts", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView},
-		{Column: t.ExpiresAt, Title: "contact_verifications.fields.expires_at", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView},
-		{Column: t.ConfirmedAt, Title: "contact_verifications.fields.confirmed_at", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView},
+		{Column: t.SentTS, Title: "contact_verifications.fields.sent_ts", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView, Extra: displayExtra("date")},
+		{Column: t.ExpiresAt, Title: "contact_verifications.fields.expires_at", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView, Extra: displayExtra("date")},
+		{Column: t.ConfirmedAt, Title: "contact_verifications.fields.confirmed_at", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView, Extra: displayExtra("date")},
 	}
 
 	return &module.BaseModule{
@@ -116,6 +117,7 @@ func ContactVerificationsModule(pool *pgxpool.Pool, conn *amqp.Connection, cfg *
 		PrimaryKey: t.ID,
 		Path:       "/auth",
 		Fields:     moduleFields,
+		Render:     contactVerificationsRender(),
 		RoleWhere: []actions.RoleWhere{
 			{Role: RoleAdmin, Where: func(c *gin.Context) pg.BoolExpression { return nil }},
 			{Role: RoleSudo, Where: func(c *gin.Context) pg.BoolExpression { return nil }},
@@ -135,7 +137,6 @@ func ContactVerificationsModule(pool *pgxpool.Pool, conn *amqp.Connection, cfg *
 				SortDefault:          t.CreationDate,
 				SortDefaultDirection: actions.SortDESC,
 				Where:                ownContactVerificationWhere(t),
-				Extra:                universalExtra("list"),
 			},
 			actions.ViewModuleAction{
 				Label:      "contact_verifications.actions.view",
@@ -143,7 +144,6 @@ func ContactVerificationsModule(pool *pgxpool.Pool, conn *amqp.Connection, cfg *
 				Permission: userRoles,
 				Auth:       true,
 				By:         []pg.Column{t.ID},
-				Extra:      universalExtra("view"),
 			},
 			actions.AddModuleAction{
 				Label: "contact_verifications.actions.add",
@@ -175,8 +175,7 @@ func ContactVerificationsModule(pool *pgxpool.Pool, conn *amqp.Connection, cfg *
 			},
 		},
 		Defrec: actions.DefrecModuleAction{
-			Label:     "contact_verifications.actions.defrec",
-			ExtraFunc: contactVerificationsDefrecExtra,
+			Label: "contact_verifications.actions.defrec",
 		},
 	}
 }
@@ -194,43 +193,107 @@ func ownContactVerificationWhere(t contactVerificationsTable) func(*gin.Context)
 	}
 }
 
-func universalExtra(action string) map[string]interface{} {
-	return map[string]interface{}{
-		"universal": map[string]interface{}{
-			"spec": map[string]interface{}{
-				"name":    "UniversalRenderer",
-				"version": "1.0.0",
+func contactVerificationsRender() renderer.Universal {
+	return renderer.Universal{
+		List: &renderer.ListPage{
+			ID:       "contact-verifications-list",
+			Title:    "contact_verifications.pages.list.title",
+			Subtitle: "contact_verifications.pages.list.subtitle",
+			Layout: &renderer.Layout{
+				Type:  renderer.LayoutOneColumn,
+				Align: renderer.AlignStretch,
+				Gap:   renderer.SpacingMD,
 			},
-			"namespace": "auth-service",
-			"module":    "contact_verifications",
-			"source": map[string]interface{}{
-				"id":        "auth",
-				"base_path": "/auth",
+			Filters: &renderer.Filters{
+				Enabled:          true,
+				PrimaryPlacement: "topbar",
+				Primary:          []string{"contact_type", "status"},
 			},
-			"action": action,
+			Pagination: &renderer.Pagination{
+				Mode: renderer.PaginationServer,
+			},
+			Actions: []renderer.Action{
+				{
+					ID:         "request_contact_verification",
+					Type:       renderer.ActionRoute,
+					LabelKey:   "contact_verifications.actions.add",
+					Variant:    renderer.ActionVariantPrimary,
+					Appearance: renderer.ActionAppearanceSolid,
+				},
+			},
+			Context: contactVerificationsContext("list"),
+		},
+		Form: &renderer.FormPage{
+			ID:       "contact-verifications-form",
+			Title:    "contact_verifications.pages.form.title",
+			Subtitle: "contact_verifications.pages.form.subtitle",
+			Layout:   renderer.LayoutOneColumn,
+			Sections: []renderer.FormSection{
+				{
+					ID:     "contact",
+					Title:  "contact_verifications.sections.contact",
+					Fields: []string{"contact_type", "recipient", "device_uid", "provider", "allow_fallback"},
+					Block: &renderer.Block{
+						Type:    renderer.BlockPanel,
+						Variant: renderer.BlockVariantDefault,
+					},
+				},
+				{
+					ID:     "confirm",
+					Title:  "contact_verifications.sections.confirm",
+					Fields: []string{"code"},
+					Block: &renderer.Block{
+						Type:    renderer.BlockPanel,
+						Variant: renderer.BlockVariantCompact,
+					},
+				},
+			},
+			Context: contactVerificationsContext("defrec"),
+		},
+		Record: &renderer.RecordPage{
+			Layout: &renderer.Layout{
+				Type:  renderer.LayoutOneColumn,
+				Align: renderer.AlignStretch,
+				Gap:   renderer.SpacingMD,
+			},
+			Sections: []renderer.RecordSection{
+				{ID: "contact", Renderer: "table", Order: 10, Extra: map[string]interface{}{"title": "contact_verifications.sections.contact", "fields": []string{"contact_type", "recipient", "provider", "allow_fallback", "status"}}},
+				{ID: "audit", Renderer: "table", Order: 20, Extra: map[string]interface{}{"title": "contact_verifications.sections.audit", "fields": []string{"id", "creation_date", "update_date", "sent_ts", "expires_at", "confirmed_at", "counter"}}},
+			},
+			Context: contactVerificationsContext("view"),
 		},
 	}
 }
 
-func contactVerificationsDefrecExtra(c *gin.Context) interface{} {
-	extra := universalExtra("defrec")
-	extra["renderer"] = map[string]interface{}{
-		"namespace": "request-generator",
-		"name":      "verified_contact",
-		"version":   1,
-	}
-	extra["field_flow"] = map[string]interface{}{
-		"type": "verified_contact",
-		"module_ref": map[string]interface{}{
-			"namespace": "auth-service",
-			"source":    "auth",
+func contactVerificationsContext(action string) map[string]interface{} {
+	return map[string]interface{}{
+		"namespace": "auth-service",
+		"module":    "contact_verifications",
+		"source": map[string]interface{}{
+			"id":        "auth",
 			"base_path": "/auth",
-			"module":    "contact_verifications",
 		},
-		"request": map[string]interface{}{"action": "add", "method": "PUT"},
-		"confirm": map[string]interface{}{"action": "update", "method": "POST", "by": "id"},
+		"action": action,
+		"field_flow": map[string]interface{}{
+			"type": "verified_contact",
+			"module_ref": map[string]interface{}{
+				"namespace": "auth-service",
+				"source":    "auth",
+				"base_path": "/auth",
+				"module":    "contact_verifications",
+			},
+			"request": map[string]interface{}{"action": "add", "method": "PUT"},
+			"confirm": map[string]interface{}{"action": "update", "method": "POST", "by": "id"},
+		},
 	}
-	return extra
+}
+
+func displayExtra(displayType string) *fields.FieldExtra {
+	display := map[string]interface{}{"display": map[string]interface{}{"type": displayType}}
+	return &fields.FieldExtra{
+		List: display,
+		View: display,
+	}
 }
 
 func beforeContactVerificationAdd(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) func(*gin.Context) error {
