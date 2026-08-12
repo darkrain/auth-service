@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -14,6 +13,7 @@ import (
 	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/delivery"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -127,60 +127,18 @@ func RequestPasswordReset(
 		return fmt.Errorf("db: upsert confirm_codes: %w", upsertErr)
 	}
 
-	// Skip RabbitMQ for test accounts
-	if testCode != "" {
+	if testCode != "" && !cfg.CodeDelivery.PublishTestAccountCodes {
 		return nil
 	}
-
-	// Publish password_reset event to RabbitMQ
-	if conn != nil {
-		type resetEvent struct {
-			Type      string `json:"type"`
-			Recipient string `json:"recipient"`
-			Code      string `json:"code"`
-			UserID    int64  `json:"user_id"`
-			TTLSec    int    `json:"ttl_sec"`
-		}
-
-		payload, err := json.Marshal(resetEvent{
-			Type:      "password_reset",
-			Recipient: login,
-			Code:      code,
-			UserID:    userID,
-			TTLSec:    ttlSec,
-		})
-		if err != nil {
-			return fmt.Errorf("json: marshal event: %w", err)
-		}
-
-		ch, err := conn.Channel()
-		if err != nil {
-			return fmt.Errorf("broker: open channel: %w", err)
-		}
-		defer ch.Close()
-
-		if err := ch.ExchangeDeclare(
-			cfg.RmqExchangeName,
-			cfg.RmqExchangeKind,
-			true, false, false, false, nil,
-		); err != nil {
-			return fmt.Errorf("broker: declare exchange: %w", err)
-		}
-
-		if err := ch.PublishWithContext(ctx,
-			cfg.RmqExchangeName,
-			cfg.RmqQueueMailName,
-			false, false,
-			amqp.Publishing{
-				ContentType: "application/json",
-				Body:        payload,
-			},
-		); err != nil {
-			return fmt.Errorf("broker: publish: %w", err)
-		}
+	recipientType := delivery.RecipientTypePhone
+	if isEmail {
+		recipientType = delivery.RecipientTypeEmail
 	}
-
-	return nil
+	return delivery.NewPublisher(conn, cfg).PublishCode(ctx, delivery.CodeRequest{
+		Template: delivery.TemplateAuthPasswordReset, Purpose: delivery.PurposePasswordReset,
+		RecipientType: recipientType, Recipient: login, Code: code, TTLSec: ttlSec,
+		UserID: userID, DeviceUID: deviceUID, AllowFallback: true,
+	})
 }
 
 // ConfirmPasswordReset verifies the reset code, updates the password, and invalidates all sessions.

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -428,58 +427,8 @@ func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 		}
 	}
 
-	// 7. Publish verification event to RabbitMQ (best-effort; ignore if broker unavailable)
-	if conn != nil {
-		eventType := "phone_verification"
-		if isEmail {
-			eventType = "email_verification"
-		}
-
-		type verificationEvent struct {
-			Type      string `json:"type"`
-			Recipient string `json:"recipient"`
-			UserID    int64  `json:"user_id"`
-		}
-
-		payload, err := json.Marshal(verificationEvent{
-			Type:      eventType,
-			Recipient: req.Login,
-			UserID:    userID,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("json: marshal event: %w", err)
-		}
-
-		ch, err := conn.Channel()
-		if err != nil {
-			return nil, fmt.Errorf("broker: open channel: %w", err)
-		}
-		defer ch.Close()
-
-		if err := ch.ExchangeDeclare(
-			cfg.RmqExchangeName,
-			cfg.RmqExchangeKind,
-			true,  // durable
-			false, // auto-delete
-			false, // internal
-			false, // no-wait
-			nil,
-		); err != nil {
-			return nil, fmt.Errorf("broker: declare exchange: %w", err)
-		}
-
-		if err := ch.PublishWithContext(ctx,
-			cfg.RmqExchangeName,
-			cfg.RmqQueueMailName,
-			false,
-			false,
-			amqp.Publishing{
-				ContentType: "application/json",
-				Body:        payload,
-			},
-		); err != nil {
-			return nil, fmt.Errorf("broker: publish: %w", err)
-		}
+	if err := SendCode(ctx, pool, conn, cfg, req.Login, "registration:"+registrationToken, "", true, userID); err != nil {
+		return nil, fmt.Errorf("send registration verification code: %w", err)
 	}
 
 	return &RegisterResult{

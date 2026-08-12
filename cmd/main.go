@@ -38,7 +38,13 @@ import (
 	"github.com/darkrain/auth-service/internal/db"
 	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/middleware"
+	authmodules "github.com/darkrain/auth-service/internal/modules"
+	rg "github.com/darkrain/request-generator"
+	"github.com/darkrain/request-generator/actions"
+	rgdb "github.com/darkrain/request-generator/db"
+	"github.com/darkrain/request-generator/locale"
 	"github.com/gin-gonic/gin"
+	amqp "github.com/rabbitmq/amqp091-go"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -105,13 +111,16 @@ func main() {
 		}
 	}()
 
-	// RabbitMQ
-	rmqConn, err := broker.Connect(cfg)
-	if err != nil {
-		log.Printf("WARNING: RabbitMQ not available: %v", err)
-	} else {
-		defer rmqConn.Close()
-		log.Println("RabbitMQ connected")
+	// RabbitMQ is not needed in explicitly isolated test mode.
+	var rmqConn *amqp.Connection
+	if cfg.MessageBroker.PublishMode != "disabled" {
+		rmqConn, err = broker.Connect(cfg)
+		if err != nil {
+			log.Printf("WARNING: RabbitMQ not available: %v", err)
+		} else {
+			defer rmqConn.Close()
+			log.Println("RabbitMQ connected")
+		}
 	}
 
 	// HTTP server
@@ -219,6 +228,32 @@ func main() {
 			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
 		handler.VerifyPhone(pgPool, cfg, cacheClient))
+
+	if pgPool != nil {
+		moduleDB := rgdb.NewDB(pgPool)
+		generator := rg.NewGenerator(
+			func(*rg.BaseModule) rgdb.DBExecutor { return moduleDB },
+			*r.Group("/"),
+			[]*rg.BaseModule{authmodules.ContactVerificationsModule(pgPool, rmqConn, cfg)},
+			func(_ actions.ModuleAction, roles []actions.Role) gin.HandlerFunc {
+				allowed := make([]string, 0, len(roles))
+				for _, role := range roles {
+					allowed = append(allowed, string(role))
+				}
+				return middleware.RequireRole(allowed...)
+			},
+			func(actions.ModuleAction) gin.HandlerFunc { return middleware.Auth(pgPool, cacheClient) },
+		)
+		generator.Locales = []locale.Lang{locale.RU, locale.EN}
+		generator.DefaultLocale = locale.EN
+		if err := generator.LoadTranslationsFile(locale.RU, "locales/ru.json"); err != nil {
+			log.Printf("WARNING: load ru generator translations: %v", err)
+		}
+		if err := generator.LoadTranslationsFile(locale.EN, "locales/en.json"); err != nil {
+			log.Printf("WARNING: load en generator translations: %v", err)
+		}
+		generator.Run()
+	}
 
 	// Authenticated user info
 	authRequired.GET("/auth/me", handler.Me())

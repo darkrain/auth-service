@@ -1,0 +1,8 @@
+{
+  "contact_verifications": {
+    "label": "Contact verification",
+    "actions": { "list": "Contact verifications", "view": "View verification", "add": "Send code", "update": "Confirm code", "defrec": "New contact verification" },
+    "fields": { "id": "ID", "contact_type": "Contact type", "recipient": "Email or phone", "device_uid": "Device ID", "provider": "Delivery provider", "allow_fallback": "Allow fallback", "status": "Status", "code": "Verification code", "creation_date": "Created", "expires_at": "Expires" },
+    "options": { "email": "Email", "phone": "Phone" }
+  }
+}

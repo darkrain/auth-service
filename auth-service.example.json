@@ -16,12 +16,23 @@
   "RedisDatabaseHost": "localhost",
   "RedisDatabasePort": "6380",
   "RedisPassword": "superredispassword",
-  "RmqHost": "localhost:5672",
-  "RmqUser": "rmquser",
-  "RmqPassword": "",
-  "RmqQueueMailName": "sendmail",
-  "RmqExchangeName": "mail",
-  "RmqExchangeKind": "direct",
+  "MessageBroker": {
+    "Host": "localhost:5672",
+    "User": "rmquser",
+    "Password": "",
+    "ExchangeName": "messages.events",
+    "ExchangeKind": "topic",
+    "PublishMode": "required",
+    "RoutingKeys": { "DeliveryRequested": "message.delivery.requested" }
+  },
+  "CodeDelivery": {
+    "Email": { "DefaultProvider": "email", "AllowedProviders": ["email"] },
+    "Phone": {
+      "DefaultProviderChain": ["telegram", "whatsapp", "sms"],
+      "AllowedProviders": ["telegram", "whatsapp", "sms"]
+    },
+    "PublishTestAccountCodes": false
+  },
   "SessionTTLDays": 30,
   "RegistrationTokenTTLMin": 30,
   "TwoFactorEnabled": false,

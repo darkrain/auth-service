@@ -86,7 +86,7 @@ func Login(pool *sql.DB, conn *amqp.Connection, cfg *config.Config, cacheClient 
 			switch {
 			case errors.Is(err, service.Err2FA):
 				// Send code and return 202 (userID=0 — not yet authenticated, skip ownership check)
-				_ = service.SendCode(c.Request.Context(), pool, conn, cfg, req.Login, req.DeviceUID, 0)
+				_ = service.SendCode(c.Request.Context(), pool, conn, cfg, req.Login, req.DeviceUID, "", true, 0)
 				c.JSON(http.StatusAccepted, gin.H{
 					"message":      "Code sent to your email/phone. Please verify.",
 					"requires_2fa": true,

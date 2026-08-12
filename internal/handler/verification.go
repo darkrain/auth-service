@@ -8,14 +8,17 @@ import (
 	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type sendCodeRequest struct {
-	Recipient string `json:"recipient" example:"user@example.com"`
-	DeviceUID string `json:"device_uid" example:"device-uuid-1234"`
+	Recipient     string `json:"recipient" example:"user@example.com"`
+	DeviceUID     string `json:"device_uid" example:"device-uuid-1234"`
+	Provider      string `json:"provider" example:"telegram"`
+	AllowFallback *bool  `json:"allow_fallback"`
 }
 
 type verifyCodeRequest struct {
@@ -70,7 +73,11 @@ func SendCode(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) gin.Handl
 			}
 		}
 
-		err := service.SendCode(c.Request.Context(), pool, conn, cfg, req.Recipient, req.DeviceUID, userID)
+		allowFallback := true
+		if req.AllowFallback != nil {
+			allowFallback = *req.AllowFallback
+		}
+		err := service.SendCode(c.Request.Context(), pool, conn, cfg, req.Recipient, req.DeviceUID, req.Provider, allowFallback, userID)
 		if err != nil {
 			switch {
 			case errors.Is(err, service.ErrInvalidEmail):
@@ -85,6 +92,8 @@ func SendCode(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) gin.Handl
 				c.JSON(http.StatusForbidden, errResp(CodeRecipientMismatch, err.Error()))
 			case errors.Is(err, service.ErrForbidden):
 				c.JSON(http.StatusForbidden, errResp(CodeForbidden, "forbidden"))
+			case errors.Is(err, delivery.ErrProviderNotAllowed):
+				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
 			default:
 				c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))
 			}
