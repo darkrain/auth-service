@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
-	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -34,7 +34,7 @@ const authTypePasswordReset = "password_reset"
 // Rate-limited per IP and per login via Redis.
 func RequestPasswordReset(
 	ctx context.Context,
-	pool *pgxpool.Pool,
+	pool *sql.DB,
 	conn *amqp.Connection,
 	cfg *config.Config,
 	cacheClient *cache.Client,
@@ -80,7 +80,7 @@ func RequestPasswordReset(
 	} else {
 		query = `SELECT id, verify_status FROM users WHERE phone = $1 LIMIT 1`
 	}
-	err := pool.QueryRow(ctx, query, login).Scan(&userID, &verifyStatus)
+	err := pool.QueryRowContext(ctx, query, login).Scan(&userID, &verifyStatus)
 	if err != nil {
 		// User not found — no enumeration, return nil
 		return nil
@@ -116,7 +116,7 @@ func RequestPasswordReset(
 	ttlSec := cfg.PasswordResetCodeTTLMin * 60
 
 	// UPSERT into confirm_codes with auth_type='password_reset'
-	_, upsertErr := pool.Exec(ctx,
+	_, upsertErr := pool.ExecContext(ctx,
 		`INSERT INTO confirm_codes (device_uid, recipient, code, counter, sent_ts, auth_type)
 		 VALUES ($1, $2, $3, 0, $4, $5)
 		 ON CONFLICT (device_uid, recipient, auth_type) DO UPDATE
@@ -186,7 +186,7 @@ func RequestPasswordReset(
 // ConfirmPasswordReset verifies the reset code, updates the password, and invalidates all sessions.
 func ConfirmPasswordReset(
 	ctx context.Context,
-	pool *pgxpool.Pool,
+	pool *sql.DB,
 	cfg *config.Config,
 	cacheClient *cache.Client,
 	login, code, deviceUID, newPassword string,
@@ -208,7 +208,7 @@ func ConfirmPasswordReset(
 	} else {
 		findQuery = `SELECT id FROM users WHERE phone = $1 LIMIT 1`
 	}
-	if err := pool.QueryRow(ctx, findQuery, login).Scan(&userID); err != nil {
+	if err := pool.QueryRowContext(ctx, findQuery, login).Scan(&userID); err != nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 
@@ -216,7 +216,7 @@ func ConfirmPasswordReset(
 	var storedCode string
 	var counter int64
 	var sentTS time.Time
-	err := pool.QueryRow(ctx,
+	err := pool.QueryRowContext(ctx,
 		`SELECT code, counter, sent_ts FROM confirm_codes
 		 WHERE device_uid=$1 AND recipient=$2 AND auth_type=$3 LIMIT 1`,
 		deviceUID, login, authTypePasswordReset,
@@ -237,7 +237,7 @@ func ConfirmPasswordReset(
 	// Compare code
 	if subtle.ConstantTimeCompare([]byte(code), []byte(storedCode)) != 1 {
 		// Increment counter
-		_, _ = pool.Exec(ctx,
+		_, _ = pool.ExecContext(ctx,
 			`UPDATE confirm_codes SET counter=counter+1
 			 WHERE device_uid=$1 AND recipient=$2 AND auth_type=$3`,
 			deviceUID, login, authTypePasswordReset,
@@ -258,7 +258,7 @@ func ConfirmPasswordReset(
 	}
 
 	// Update password
-	_, err = pool.Exec(ctx,
+	_, err = pool.ExecContext(ctx,
 		`UPDATE users SET password=$1, update_date=NOW() WHERE id=$2`,
 		string(hash), userID,
 	)
@@ -267,7 +267,7 @@ func ConfirmPasswordReset(
 	}
 
 	// Delete the reset code
-	_, _ = pool.Exec(ctx,
+	_, _ = pool.ExecContext(ctx,
 		`DELETE FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 AND auth_type=$3`,
 		deviceUID, login, authTypePasswordReset,
 	)
@@ -275,7 +275,7 @@ func ConfirmPasswordReset(
 	// Invalidate all active sessions for this user
 	// First, collect session tokens for Redis cache invalidation
 	if cacheClient != nil {
-		rows, qErr := pool.Query(ctx,
+		rows, qErr := pool.QueryContext(ctx,
 			`SELECT token FROM sessions WHERE user_id=$1 AND blocked=false`,
 			userID,
 		)
@@ -291,7 +291,7 @@ func ConfirmPasswordReset(
 	}
 
 	// Mark all sessions as blocked in DB
-	_, _ = pool.Exec(ctx,
+	_, _ = pool.ExecContext(ctx,
 		`UPDATE sessions SET blocked=true WHERE user_id=$1`,
 		userID,
 	)

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Error code constants for middleware responses
@@ -20,7 +20,7 @@ const (
 // Auth middleware validates Bearer token or X-API-Key header.
 // It checks the Redis cache first; on cache miss it queries the sessions table,
 // then caches the result with TTL = expire_date - now.
-func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
+func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var token string
 
@@ -74,7 +74,7 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		var blocked bool
 		var expireDate *time.Time
 
-		err := pool.QueryRow(c.Request.Context(), `
+		err := pool.QueryRowContext(c.Request.Context(), `
 			SELECT s.user_id, COALESCE(u.email,''), COALESCE(u.phone,''), u.role, u.verify_status, s.blocked, s.expire_date, COALESCE(s.auth_type,'')
 			FROM sessions s
 			JOIN users u ON u.id = s.user_id

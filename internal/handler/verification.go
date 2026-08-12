@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strings"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -43,7 +43,7 @@ type verifyLogin2FARequest struct {
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/send-code [post]
-func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin.HandlerFunc {
+func SendCode(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req sendCodeRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -112,7 +112,7 @@ func SendCode(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/verify/email [post]
-func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config, cacheClient ...*cache.Client) gin.HandlerFunc {
+func VerifyEmail(pool *sql.DB, cfg *config.Config, cacheClient ...*cache.Client) gin.HandlerFunc {
 	var cc *cache.Client
 	if len(cacheClient) > 0 {
 		cc = cacheClient[0]
@@ -162,7 +162,7 @@ func VerifyEmail(pool *pgxpool.Pool, cfg *config.Config, cacheClient ...*cache.C
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/verify/phone [post]
-func VerifyPhone(pool *pgxpool.Pool, cfg *config.Config, cacheClient ...*cache.Client) gin.HandlerFunc {
+func VerifyPhone(pool *sql.DB, cfg *config.Config, cacheClient ...*cache.Client) gin.HandlerFunc {
 	var cc *cache.Client
 	if len(cacheClient) > 0 {
 		cc = cacheClient[0]
@@ -209,7 +209,7 @@ func VerifyPhone(pool *pgxpool.Pool, cfg *config.Config, cacheClient ...*cache.C
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/login/verify-2fa [post]
-func VerifyLogin2FA(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
+func VerifyLogin2FA(pool *sql.DB, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req verifyLogin2FARequest
 		if err := c.ShouldBindJSON(&req); err != nil {

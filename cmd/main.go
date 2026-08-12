@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"database/sql"
 	_ "github.com/darkrain/auth-service/docs"
 	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
@@ -38,7 +39,6 @@ import (
 	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/middleware"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -71,7 +71,7 @@ func main() {
 	defer cancel()
 
 	// PostgreSQL
-	var pgPool *pgxpool.Pool
+	var pgPool *sql.DB
 	rawPool, err := db.Connect(cfg)
 	if err != nil {
 		log.Printf("WARNING: PostgreSQL not available: %v", err)

@@ -12,10 +12,10 @@ import (
 	"time"
 	"unicode"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/validator"
-	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -61,7 +61,7 @@ type Login2FARequest struct {
 // Login validates credentials, creates a session, and returns a token.
 // If cfg.TwoFactorEnabled is true and password is valid, returns Err2FA without creating session.
 // cacheClient is used for account lock checks; may be nil.
-func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cacheClient *cache.Client, login, password, ip string) (*LoginResult, error) {
+func Login(ctx context.Context, pool *sql.DB, cfg *config.Config, cacheClient *cache.Client, login, password, ip string) (*LoginResult, error) {
 	login = strings.TrimSpace(login)
 	password = strings.TrimSpace(password)
 
@@ -85,7 +85,7 @@ func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cacheCli
 		} else {
 			query = `SELECT id, password, verify_status FROM users WHERE phone = $1 LIMIT 1`
 		}
-		err := pool.QueryRow(ctx, query, login).Scan(&userID, &storedHash, &verifyStatus)
+		err := pool.QueryRowContext(ctx, query, login).Scan(&userID, &storedHash, &verifyStatus)
 		if err != nil {
 			return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 		}
@@ -150,7 +150,7 @@ func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cacheCli
 
 	// Insert session
 	if pool != nil {
-		_, err := pool.Exec(ctx,
+		_, err := pool.ExecContext(ctx,
 			`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked) VALUES ($1, $2, $3, $4, $5, false)`,
 			userID, token, expireDate, "password", ip,
 		)
@@ -166,7 +166,7 @@ func Login(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cacheCli
 }
 
 // createSession generates a token, inserts a session, and returns LoginResult.
-func createSession(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, userID int64, ip string) (*LoginResult, error) {
+func createSession(ctx context.Context, pool *sql.DB, cfg *config.Config, userID int64, ip string) (*LoginResult, error) {
 	// Generate token
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
@@ -182,7 +182,7 @@ func createSession(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, 
 	expireDate := time.Now().Add(time.Duration(ttlDays) * 24 * time.Hour)
 
 	if pool != nil {
-		_, err := pool.Exec(ctx,
+		_, err := pool.ExecContext(ctx,
 			`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked) VALUES ($1, $2, $3, $4, $5, false)`,
 			userID, token, expireDate, "password", ip,
 		)
@@ -198,7 +198,7 @@ func createSession(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, 
 }
 
 // LoginVerify2FA verifies the 2FA code for a given login and creates a session if valid.
-func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, req Login2FARequest) (*LoginResult, error) {
+func LoginVerify2FA(ctx context.Context, pool *sql.DB, cfg *config.Config, req Login2FARequest) (*LoginResult, error) {
 	req.Login = strings.TrimSpace(req.Login)
 	if req.Login == "" {
 		return nil, fmt.Errorf("%w: login is required", ErrValidation)
@@ -216,7 +216,7 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 		} else {
 			query = `SELECT id, verify_status FROM users WHERE phone = $1 LIMIT 1`
 		}
-		if err := pool.QueryRow(ctx, query, req.Login).Scan(&userID, &verifyStatus); err != nil {
+		if err := pool.QueryRowContext(ctx, query, req.Login).Scan(&userID, &verifyStatus); err != nil {
 			return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 		}
 	}
@@ -250,7 +250,7 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 		var counter int64
 		var sentTS time.Time
 
-		err := pool.QueryRow(ctx,
+		err := pool.QueryRowContext(ctx,
 			`SELECT code, counter, sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 LIMIT 1`,
 			req.DeviceUID, req.Login,
 		).Scan(&storedCode, &counter, &sentTS)
@@ -268,7 +268,7 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 			return nil, fmt.Errorf("%w: Too many attempts. Request a new code.", ErrTooManyRequests)
 		}
 		if subtle.ConstantTimeCompare([]byte(req.Code), []byte(storedCode)) != 1 {
-			_, _ = pool.Exec(ctx,
+			_, _ = pool.ExecContext(ctx,
 				`UPDATE confirm_codes SET counter=counter+1 WHERE device_uid=$1 AND recipient=$2`,
 				req.DeviceUID, req.Login,
 			)
@@ -276,7 +276,7 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 		}
 
 		// Delete the used code
-		_, _ = pool.Exec(ctx,
+		_, _ = pool.ExecContext(ctx,
 			`DELETE FROM confirm_codes WHERE device_uid=$1 AND recipient=$2`,
 			req.DeviceUID, req.Login,
 		)
@@ -287,11 +287,11 @@ func LoginVerify2FA(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config,
 }
 
 // Logout marks a session as blocked and invalidates the Redis cache.
-func Logout(ctx context.Context, pool *pgxpool.Pool, cacheClient *cache.Client, token string) error {
+func Logout(ctx context.Context, pool *sql.DB, cacheClient *cache.Client, token string) error {
 	if pool == nil {
 		return nil
 	}
-	_, err := pool.Exec(ctx, `UPDATE sessions SET blocked=true WHERE token=$1`, token)
+	_, err := pool.ExecContext(ctx, `UPDATE sessions SET blocked=true WHERE token=$1`, token)
 	if err != nil {
 		return fmt.Errorf("db: update session: %w", err)
 	}
@@ -316,7 +316,7 @@ type RegisterResult struct {
 
 // Register validates, hashes password, inserts user and publishes a verification event.
 // Returns a short-lived registration token the client can use to authenticate verify calls.
-func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, req RegisterRequest) (*RegisterResult, error) {
+func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *config.Config, req RegisterRequest) (*RegisterResult, error) {
 	// 1. Basic field validation
 	if strings.TrimSpace(req.Login) == "" {
 		return nil, fmt.Errorf("%w: login (email or phone) is required", ErrValidation)
@@ -370,7 +370,7 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 		} else {
 			query = `SELECT EXISTS(SELECT 1 FROM users WHERE phone = $1)`
 		}
-		if err := pool.QueryRow(ctx, query, req.Login).Scan(&exists); err != nil {
+		if err := pool.QueryRowContext(ctx, query, req.Login).Scan(&exists); err != nil {
 			return nil, fmt.Errorf("db: uniqueness check: %w", err)
 		}
 		if exists {
@@ -399,7 +399,7 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 		} else {
 			insertQuery = `INSERT INTO users (phone, password, role, verify_status) VALUES ($1, $2, $3, 'registered') RETURNING id`
 		}
-		if err := pool.QueryRow(ctx, insertQuery, req.Login, string(hash), role).Scan(&userID); err != nil {
+		if err := pool.QueryRowContext(ctx, insertQuery, req.Login, string(hash), role).Scan(&userID); err != nil {
 			return nil, fmt.Errorf("db: insert user: %w", err)
 		}
 	}
@@ -419,7 +419,7 @@ func Register(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	expiresIn := ttlMin * 60
 
 	if pool != nil {
-		_, err := pool.Exec(ctx,
+		_, err := pool.ExecContext(ctx,
 			`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked) VALUES ($1, $2, $3, 'registration', '127.0.0.1', false)`,
 			userID, registrationToken, expireDate,
 		)

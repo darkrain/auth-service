@@ -13,18 +13,18 @@ import (
 	"strings"
 	"testing"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/db"
 	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/middleware"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var (
 	testCfg    *config.Config
-	testPool   *pgxpool.Pool
+	testPool   *sql.DB
 	testCache  *cache.Client
 	testRouter *gin.Engine
 )
@@ -145,7 +145,7 @@ func truncateTables(t *testing.T) {
 		`DELETE FROM users WHERE role != 'system'`,
 	}
 	for _, stmt := range statements {
-		if _, err := testPool.Exec(ctx, stmt); err != nil {
+		if _, err := testPool.ExecContext(ctx, stmt); err != nil {
 			t.Fatalf("truncateTables %q: %v", stmt, err)
 		}
 	}
@@ -227,7 +227,7 @@ func getConfirmCode(t *testing.T, recipient, deviceUID string) string {
 	t.Helper()
 	ctx := context.Background()
 	var code string
-	err := testPool.QueryRow(ctx,
+	err := testPool.QueryRowContext(ctx,
 		`SELECT code FROM confirm_codes WHERE recipient=$1 AND device_uid=$2 LIMIT 1`,
 		recipient, deviceUID,
 	).Scan(&code)
@@ -251,13 +251,13 @@ func createTempSession(t *testing.T, recipient string) string {
 	} else {
 		query = `SELECT id FROM users WHERE phone=$1 LIMIT 1`
 	}
-	if err := testPool.QueryRow(ctx, query, recipient).Scan(&userID); err != nil {
+	if err := testPool.QueryRowContext(ctx, query, recipient).Scan(&userID); err != nil {
 		t.Fatalf("createTempSession: user not found for %s: %v", recipient, err)
 	}
 
 	// Insert a temporary session (30 days expiry)
 	token := fmt.Sprintf("test-temp-session-%d", userID)
-	_, err := testPool.Exec(ctx,
+	_, err := testPool.ExecContext(ctx,
 		`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked)
 		 VALUES ($1, $2, NOW() + INTERVAL '30 days', 'password', '127.0.0.1', false)
 		 ON CONFLICT DO NOTHING`,

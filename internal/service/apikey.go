@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // APIKey is returned when a new API key is created.
@@ -25,7 +25,7 @@ type APIKeyInfo struct {
 }
 
 // CreateAPIKey generates a new API key and stores it in sessions.
-func CreateAPIKey(ctx context.Context, pool *pgxpool.Pool, userID int) (*APIKey, error) {
+func CreateAPIKey(ctx context.Context, pool *sql.DB, userID int) (*APIKey, error) {
 	// Generate 32 random bytes → hex string (64 chars)
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -43,7 +43,7 @@ func CreateAPIKey(ctx context.Context, pool *pgxpool.Pool, userID int) (*APIKey,
 	// API keys don't expire — use a far-future date (100 years)
 	apiKeyExpiry := time.Now().AddDate(100, 0, 0)
 
-	err := pool.QueryRow(ctx, `
+	err := pool.QueryRowContext(ctx, `
 		INSERT INTO sessions (user_id, token, auth_type, blocked, expire_date)
 		VALUES ($1, $2, 'api', false, $3)
 		RETURNING id, creation_date
@@ -60,12 +60,12 @@ func CreateAPIKey(ctx context.Context, pool *pgxpool.Pool, userID int) (*APIKey,
 }
 
 // ListAPIKeys returns all active API keys for a user (without the token value).
-func ListAPIKeys(ctx context.Context, pool *pgxpool.Pool, userID int) ([]APIKeyInfo, error) {
+func ListAPIKeys(ctx context.Context, pool *sql.DB, userID int) ([]APIKeyInfo, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
 
-	rows, err := pool.Query(ctx, `
+	rows, err := pool.QueryContext(ctx, `
 		SELECT id, creation_date
 		FROM sessions
 		WHERE user_id = $1 AND auth_type = 'api' AND blocked = false
@@ -96,16 +96,16 @@ func ListAPIKeys(ctx context.Context, pool *pgxpool.Pool, userID int) ([]APIKeyI
 }
 
 // RevokeAPIKey sets blocked=true for the given API key owned by userID and invalidates Redis cache.
-func RevokeAPIKey(ctx context.Context, pool *pgxpool.Pool, cacheClient *cache.Client, keyID, userID int) error {
+func RevokeAPIKey(ctx context.Context, pool *sql.DB, cacheClient *cache.Client, keyID, userID int) error {
 	if pool == nil {
 		return fmt.Errorf("database unavailable")
 	}
 
 	// Fetch token before blocking so we can invalidate cache
 	var token string
-	_ = pool.QueryRow(ctx, `SELECT token FROM sessions WHERE id=$1 AND user_id=$2`, keyID, userID).Scan(&token)
+	_ = pool.QueryRowContext(ctx, `SELECT token FROM sessions WHERE id=$1 AND user_id=$2`, keyID, userID).Scan(&token)
 
-	tag, err := pool.Exec(ctx, `
+	result, err := pool.ExecContext(ctx, `
 		UPDATE sessions SET blocked = true
 		WHERE id = $1 AND user_id = $2 AND auth_type = 'api'
 	`, keyID, userID)
@@ -113,7 +113,11 @@ func RevokeAPIKey(ctx context.Context, pool *pgxpool.Pool, cacheClient *cache.Cl
 		return fmt.Errorf("db: revoke api key: %w", err)
 	}
 
-	if tag.RowsAffected() == 0 {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("db: read revoked api key count: %w", err)
+	}
+	if affected == 0 {
 		return fmt.Errorf("%w: api key not found", ErrNotFound)
 	}
 

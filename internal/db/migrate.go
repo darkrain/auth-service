@@ -8,12 +8,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"database/sql"
 )
 
-func Migrate(pool *pgxpool.Pool, migrationsDir string) error {
+func Migrate(pool *sql.DB, migrationsDir string) error {
 	// Create migrations tracking table if not exists
-	_, err := pool.Exec(context.Background(), `
+	_, err := pool.ExecContext(context.Background(), `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			filename TEXT PRIMARY KEY,
 			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -24,7 +24,7 @@ func Migrate(pool *pgxpool.Pool, migrationsDir string) error {
 	}
 
 	// Read applied migrations
-	rows, err := pool.Query(context.Background(), `SELECT filename FROM schema_migrations`)
+	rows, err := pool.QueryContext(context.Background(), `SELECT filename FROM schema_migrations`)
 	if err != nil {
 		return fmt.Errorf("migrate: query applied: %w", err)
 	}
@@ -64,11 +64,11 @@ func Migrate(pool *pgxpool.Pool, migrationsDir string) error {
 			return fmt.Errorf("migrate: read %q: %w", name, err)
 		}
 
-		if _, err := pool.Exec(context.Background(), string(content)); err != nil {
+		if _, err := pool.ExecContext(context.Background(), string(content)); err != nil {
 			return fmt.Errorf("migrate: exec %q: %w", name, err)
 		}
 
-		if _, err := pool.Exec(context.Background(),
+		if _, err := pool.ExecContext(context.Background(),
 			`INSERT INTO schema_migrations (filename) VALUES ($1)`, name); err != nil {
 			return fmt.Errorf("migrate: record %q: %w", name, err)
 		}

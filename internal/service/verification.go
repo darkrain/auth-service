@@ -15,7 +15,6 @@ import (
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/validator"
-	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -31,7 +30,7 @@ var ErrForbiddenRecipient = errors.New("recipient does not belong to authenticat
 // SendCode generates a 6-digit verification code and publishes it to RabbitMQ.
 // Rate-limited: if an existing code's TTL hasn't expired, returns ErrTooManyRequests.
 // userID is the authenticated user's ID; recipient must match their email or phone.
-func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, recipient, deviceUID string, userID int64) error {
+func SendCode(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *config.Config, recipient, deviceUID string, userID int64) error {
 	recipient = strings.TrimSpace(recipient)
 	if recipient == "" {
 		return fmt.Errorf("%w: recipient is required", ErrValidation)
@@ -53,7 +52,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	// HIGH-NEW-1: verify that the recipient belongs to the authenticated user
 	if pool != nil && userID > 0 {
 		var dbEmail, dbPhone sql.NullString
-		err := pool.QueryRow(ctx, "SELECT email, phone FROM users WHERE id=$1", userID).Scan(&dbEmail, &dbPhone)
+		err := pool.QueryRowContext(ctx, "SELECT email, phone FROM users WHERE id=$1", userID).Scan(&dbEmail, &dbPhone)
 		if err != nil {
 			return ErrForbidden
 		}
@@ -77,7 +76,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 		} else {
 			query = `SELECT id FROM users WHERE phone = $1 LIMIT 1`
 		}
-		if err := pool.QueryRow(ctx, query, recipient).Scan(&recipientUserID); err != nil {
+		if err := pool.QueryRowContext(ctx, query, recipient).Scan(&recipientUserID); err != nil {
 			// user not found — still proceed (don't leak existence)
 			recipientUserID = 0
 		}
@@ -86,7 +85,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 	// Check rate limit: if existing record has unexpired TTL, reject
 	if pool != nil && cfg.RateLimit.Code.TTLSec > 0 {
 		var oldSentTS time.Time
-		err := pool.QueryRow(ctx,
+		err := pool.QueryRowContext(ctx,
 			`SELECT sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 AND auth_type='verification' LIMIT 1`,
 			deviceUID, recipient,
 		).Scan(&oldSentTS)
@@ -125,7 +124,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 
 	// UPSERT into confirm_codes
 	if pool != nil {
-		_, upsertErr := pool.Exec(ctx,
+		_, upsertErr := pool.ExecContext(ctx,
 			`INSERT INTO confirm_codes (device_uid, recipient, code, counter, sent_ts, auth_type)
 			 VALUES ($1, $2, $3, 0, $4, 'verification')
 			 ON CONFLICT (device_uid, recipient, auth_type) DO UPDATE
@@ -205,7 +204,7 @@ func SendCode(ctx context.Context, pool *pgxpool.Pool, conn *amqp.Connection, cf
 // verifyType must be "email" or "phone".
 // userID is the authenticated user's ID; the recipient must match their email/phone.
 // cacheClient is optional; used to purge registration session tokens from Redis.
-func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cacheClient *cache.Client, recipient, code, deviceUID, verifyType string, userID int64) error {
+func VerifyCode(ctx context.Context, pool *sql.DB, cfg *config.Config, cacheClient *cache.Client, recipient, code, deviceUID, verifyType string, userID int64) error {
 	recipient = strings.TrimSpace(recipient)
 	code = strings.TrimSpace(code)
 
@@ -234,7 +233,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 		} else {
 			ownerQuery = `SELECT COALESCE(phone,'') FROM users WHERE id=$1 LIMIT 1`
 		}
-		if err := pool.QueryRow(ctx, ownerQuery, userID).Scan(&dbValue); err != nil {
+		if err := pool.QueryRowContext(ctx, ownerQuery, userID).Scan(&dbValue); err != nil {
 			return fmt.Errorf("%w: user not found", ErrNotFound)
 		}
 		if dbValue != recipient {
@@ -246,7 +245,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 	var counter int64
 	var sentTS time.Time
 
-	err := pool.QueryRow(ctx,
+	err := pool.QueryRowContext(ctx,
 		`SELECT code, counter, sent_ts FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 AND auth_type='verification' LIMIT 1`,
 		deviceUID, recipient,
 	).Scan(&storedCode, &counter, &sentTS)
@@ -270,7 +269,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 	// Compare code
 	if subtle.ConstantTimeCompare([]byte(code), []byte(storedCode)) != 1 {
 		// Increment counter
-		_, _ = pool.Exec(ctx,
+		_, _ = pool.ExecContext(ctx,
 			`UPDATE confirm_codes SET counter=counter+1 WHERE device_uid=$1 AND recipient=$2 AND auth_type='verification'`,
 			deviceUID, recipient,
 		)
@@ -279,12 +278,12 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 
 	// Code is correct — update user and delete confirm record
 	if verifyType == "email" {
-		_, err = pool.Exec(ctx,
+		_, err = pool.ExecContext(ctx,
 			`UPDATE users SET email_verified=true, verify_status='verified' WHERE email=$1`,
 			recipient,
 		)
 	} else {
-		_, err = pool.Exec(ctx,
+		_, err = pool.ExecContext(ctx,
 			`UPDATE users SET phone_verified=true, verify_status='verified' WHERE phone=$1`,
 			recipient,
 		)
@@ -293,7 +292,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 		return fmt.Errorf("db: update user verified: %w", err)
 	}
 
-	_, err = pool.Exec(ctx,
+	_, err = pool.ExecContext(ctx,
 		`DELETE FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 AND auth_type='verification'`,
 		deviceUID, recipient,
 	)
@@ -305,7 +304,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 	if userID > 0 {
 		// Fetch registration session tokens before blocking them (for cache invalidation)
 		if cacheClient != nil {
-			rows, qErr := pool.Query(ctx,
+			rows, qErr := pool.QueryContext(ctx,
 				`SELECT token FROM sessions WHERE user_id=$1 AND auth_type='registration' AND blocked=false`,
 				userID,
 			)
@@ -319,7 +318,7 @@ func VerifyCode(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, cac
 				}
 			}
 		}
-		_, _ = pool.Exec(ctx,
+		_, _ = pool.ExecContext(ctx,
 			`UPDATE sessions SET blocked=true WHERE user_id=$1 AND auth_type='registration'`,
 			userID,
 		)
