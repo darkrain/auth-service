@@ -1,6 +1,5 @@
 bin/
 vendor/
 *.local.json
-auth-service.test.json
 config.json
 *.backup*
