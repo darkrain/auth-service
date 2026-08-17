@@ -30,9 +30,12 @@ type login2FAResponse struct {
 }
 
 type registerRequest struct {
-	Login    string `json:"login" example:"user@example.com"`
-	Password string `json:"password" example:"Secret123!"`
-	Role     string `json:"role" example:"model"`
+	Login         string `json:"login" example:"user@example.com"`
+	Password      string `json:"password" example:"Secret123!"`
+	Role          string `json:"role" example:"model"`
+	DeviceUID     string `json:"device_uid" example:"device-uuid-1234"`
+	Provider      string `json:"provider,omitempty" example:"telegram"`
+	AllowFallback bool   `json:"allow_fallback"`
 }
 
 type messageResponse struct {
@@ -43,6 +46,7 @@ type registerResponse struct {
 	Message           string `json:"message" example:"Registration successful. Please verify your email/phone."`
 	RegistrationToken string `json:"registration_token" example:"a3f2c1...hex64"`
 	ExpiresIn         int    `json:"expires_in" example:"1800"`
+	VerificationID    int64  `json:"verification_id" example:"42"`
 }
 
 type errorResponse struct {
@@ -227,9 +231,8 @@ func Register(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) gin.Handl
 		}
 
 		result, err := service.Register(c.Request.Context(), pool, conn, cfg, service.RegisterRequest{
-			Login:    req.Login,
-			Password: req.Password,
-			Role:     req.Role,
+			Login: req.Login, Password: req.Password, Role: req.Role, DeviceUID: req.DeviceUID,
+			Provider: req.Provider, AllowFallback: req.AllowFallback,
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidEmail) {
@@ -267,6 +270,7 @@ func Register(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) gin.Handl
 			"message":            "Registration successful. Please verify your " + loginType + ".",
 			"registration_token": result.RegistrationToken,
 			"expires_in":         result.ExpiresIn,
+			"verification_id":    result.VerificationID,
 		})
 	}
 }

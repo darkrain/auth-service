@@ -46,7 +46,7 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 				// Restrict registration tokens
 				if sd.AuthType == "registration" {
 					path := c.FullPath()
-					if path != "/auth/verify/email" && path != "/auth/verify/phone" && path != "/auth/send-code" {
+					if !registrationVerificationPath(path) {
 						c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification", "code": codeRegistrationToken})
 						return
 					}
@@ -99,7 +99,7 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 		// Restrict registration tokens to verification endpoints only
 		if authType == "registration" {
 			path := c.FullPath()
-			if path != "/auth/verify/email" && path != "/auth/verify/phone" && path != "/auth/send-code" {
+			if !registrationVerificationPath(path) {
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification", "code": codeRegistrationToken})
 				return
 			}
@@ -141,6 +141,10 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func registrationVerificationPath(path string) bool {
+	return path == "/auth/contact_verifications/:bykey/:value"
 }
 
 // RequireRole middleware checks that the authenticated user has one of the allowed roles.

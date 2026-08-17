@@ -26,7 +26,7 @@
   "TrustedProxies": ["127.0.0.1"],
   "AllowedOrigins": ["http://localhost:3000"],
   "PostgreSQLSSLMode": "disable",
-  "TestAccounts": [{"login": "testaccount@example.com", "code": "111111"}, {"login": "reset-test@example.com", "code": "777777"}],
+  "TestAccounts": [{"login": "testaccount@example.com", "code": "111111"}, {"login": "reset-test@example.com", "code": "777777"}, {"login": "+79990000001", "code": "222222"}],
   "AllowedRoles": ["model", "manager", "agency", "client", "support"],
   "RateLimit": { "IP": { "LoginMaxAttempts": 100, "LoginWindowSec": 60, "RegisterMaxAttempts": 100, "RegisterWindowSec": 60, "SendCodeMaxAttempts": 100, "SendCodeWindowSec": 60 }, "Device": { "LoginMaxAttempts": 100, "LoginWindowSec": 60, "SendCodeMaxAttempts": 100, "SendCodeWindowSec": 60, "RegisterMaxAttempts": 100, "RegisterWindowSec": 60 }, "Account": { "MaxFailedLogins": 100, "LockDurationSec": 60 }, "Code": { "MaxAttempts": 10, "TTLSec": 300 } }
 }

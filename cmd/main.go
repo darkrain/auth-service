@@ -204,12 +204,6 @@ func main() {
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pgPool, cacheClient))
 
-	authRequired.POST("/auth/send-code",
-		middleware.RateLimit(cacheClient, rmqConn, "/auth/send-code",
-			cfg.RateLimit.IP.SendCodeMaxAttempts, cfg.RateLimit.IP.SendCodeWindowSec,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.SendCode(pgPool, rmqConn, cfg))
-
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")
 	apiKeys.Use(middleware.RequireRole("admin", "system"))
@@ -217,24 +211,12 @@ func main() {
 	apiKeys.GET("", handler.ListAPIKeys(pgPool))
 	apiKeys.DELETE("/:id", handler.RevokeAPIKey(pgPool, cacheClient))
 
-	// CRIT-2 + HIGH-2: verify endpoints require auth and have rate limiting
-	authRequired.POST("/auth/verify/email",
-		middleware.RateLimit(cacheClient, rmqConn, "/auth/verify/email",
-			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyEmail(pgPool, cfg, cacheClient))
-	authRequired.POST("/auth/verify/phone",
-		middleware.RateLimit(cacheClient, rmqConn, "/auth/verify/phone",
-			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyPhone(pgPool, cfg, cacheClient))
-
 	if pgPool != nil {
 		moduleDB := rgdb.NewDB(pgPool)
 		generator := rg.NewGenerator(
 			func(*rg.BaseModule) rgdb.DBExecutor { return moduleDB },
 			*r.Group("/"),
-			[]*rg.BaseModule{authmodules.ContactVerificationsModule(pgPool, rmqConn, cfg)},
+			[]*rg.BaseModule{authmodules.ContactVerificationsModule(pgPool, rmqConn, cacheClient, cfg), authmodules.AccountSecurityModule(pgPool, cfg)},
 			func(_ actions.ModuleAction, roles []actions.Role) gin.HandlerFunc {
 				allowed := make([]string, 0, len(roles))
 				for _, role := range roles {

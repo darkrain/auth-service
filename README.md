@@ -11,7 +11,7 @@ A lightweight authentication and authorization microservice built with Go and Gi
 - Redis-backed rate limiting and session cache
 - PostgreSQL for persistent storage with auto-migrations
 - Versioned `message.delivery.requested` events for the separate message-delivery service
-- API-driven `contact_verifications` module powered by request-generator
+- API-driven contact verification and account-security modules powered by request-generator
 - Swagger/OpenAPI documentation
 
 ## API Endpoints
@@ -22,9 +22,9 @@ A lightweight authentication and authorization microservice built with Go and Gi
 | POST | `/auth/register` | — | Register a new user |
 | POST | `/auth/login` | — | Login with email/phone + password |
 | POST | `/auth/logout` | Bearer | Logout and invalidate token |
-| POST | `/auth/send-code` | Bearer | Send verification code to an existing contact |
-| POST | `/auth/verify/email` | — | Verify email address |
-| POST | `/auth/verify/phone` | — | Verify phone number |
+| PUT | `/auth/contact_verifications` | Bearer | Request verification for an additional email or phone |
+| POST | `/auth/contact_verifications/id/{id}` | Bearer | Confirm a contact-verification code |
+| GET | `/auth/account_security/view/id/{current_user_id}` | Bearer | API-driven Account & Security settings projection |
 | POST | `/auth/login/verify-2fa` | — | Complete 2FA login |
 | GET | `/auth/me` | Bearer | Get current user info |
 | POST | `/auth/api-keys` | Bearer + admin/system | Create API key |
@@ -71,24 +71,64 @@ creates and validates the code, then publishes this stable payload to RabbitMQ:
 }
 ```
 
-To request a code with a selected delivery method, call the protected endpoint:
+## Registration And Contact Verification
+
+Registration always creates an unverified account and returns a short-lived
+`registration_token` plus the ID of the verification record. The token is only
+accepted by the confirmation action for that record; it cannot read account
+data or use other protected endpoints.
 
 ```json
-POST /auth/send-code
-Authorization: Bearer <session-token>
+POST /auth/register
 
 {
-  "recipient": "+79991234567",
-  "device_uid": "device-123",
-  "provider": "telegram",
-  "allow_fallback": false
+  "login": "model@example.com",
+  "password": "Password1!",
+  "role": "model",
+  "device_uid": "web-device-123",
+  "allow_fallback": true
 }
 ```
 
-Authenticated clients can also use generator routes under
-`/auth/contact_verifications` to add and confirm an additional email address or
-phone number. The module's `defrec`, `add`, `list`, `view`, and `update` actions
-return the UniversalRenderer metadata and localized labels needed by an API-driven UI.
+```json
+{
+  "registration_token": "short-lived-registration-token",
+  "verification_id": 42,
+  "expires_in": 1800
+}
+```
+
+Confirm that record through the standard generator update action:
+
+```json
+POST /auth/contact_verifications/id/42
+Authorization: Bearer <registration_token>
+
+{ "code": "123456" }
+```
+
+For an authenticated account, the same module adds a missing second sign-in
+contact. The authenticated user ID comes from `GET /auth/me`; the account
+security view exposes the localized modal action metadata used by a client.
+
+```json
+PUT /auth/contact_verifications
+Authorization: Bearer <session-token>
+
+{
+  "contact_type": "phone",
+  "recipient": "+79991234567",
+  "device_uid": "web-device-123",
+  "provider": "telegram",
+  "allow_fallback": true
+}
+```
+
+The response returns the new verification ID. Confirm it with the same `POST
+/auth/contact_verifications/id/{id}` action. Only a bcrypt hash is stored in
+PostgreSQL; the plaintext code exists only while the delivery event is being
+published. `CodeDelivery` validates a user-selected provider and its fallback
+chain before the request is created.
 
 ### Run locally
 

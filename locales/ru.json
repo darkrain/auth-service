@@ -1,8 +1,21 @@
 {
+  "account_security": {
+    "label": "Аккаунт и безопасность",
+    "subtitle": "Управляйте подтверждёнными контактами для входа и восстановления доступа.",
+    "actions": { "view": "Аккаунт и безопасность" },
+    "fields": { "id": "ID", "email": "Email", "email_verified": "Email подтверждён", "phone": "Телефон", "phone_verified": "Телефон подтверждён", "role": "Роль", "verify_status": "Статус аккаунта" },
+    "contacts": {
+      "title": "Контакты для входа",
+      "subtitle": "Добавьте второй способ входа. Новый контакт станет доступен только после подтверждения кода.",
+      "email": { "title": "Email", "text": "Добавить или заменить email", "action": "Управлять email" },
+      "phone": { "title": "Телефон", "text": "Добавить или заменить телефон", "action": "Управлять телефоном" }
+    },
+    "status": { "verified": "Подтверждён", "not_verified": "Не подтверждён" }
+  },
   "contact_verifications": {
     "label": "Подтверждение контакта",
     "actions": { "list": "Подтверждения контактов", "view": "Просмотр подтверждения", "add": "Отправить код", "update": "Подтвердить код", "defrec": "Новое подтверждение контакта" },
-    "fields": { "id": "ID", "contact_type": "Тип контакта", "recipient": "Email или телефон", "device_uid": "ID устройства", "provider": "Провайдер доставки", "allow_fallback": "Разрешить резервную доставку", "status": "Статус", "code": "Код подтверждения", "creation_date": "Создано", "expires_at": "Истекает" },
+    "fields": { "id": "ID", "user_id": "Пользователь", "contact_type": "Тип контакта", "recipient": "Email или телефон", "device_uid": "ID устройства", "provider": "Провайдер доставки", "allow_fallback": "Разрешить резервную доставку", "purpose": "Назначение", "status": "Статус", "code": "Код подтверждения", "counter": "Попытки", "sent_at": "Отправлено", "creation_date": "Создано", "expires_at": "Истекает" },
     "options": { "email": "Email", "phone": "Телефон" }
   }
 }

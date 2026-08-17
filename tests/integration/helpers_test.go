@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,7 +20,13 @@ import (
 	"github.com/darkrain/auth-service/internal/db"
 	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/middleware"
+	authmodules "github.com/darkrain/auth-service/internal/modules"
+	rg "github.com/darkrain/request-generator"
+	"github.com/darkrain/request-generator/actions"
+	rgdb "github.com/darkrain/request-generator/db"
+	"github.com/darkrain/request-generator/locale"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -99,24 +106,29 @@ func TestMain(m *testing.M) {
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pool, testCache))
 
-	// NEW-2: /auth/send-code moved to authRequired group
-	authRequired.POST("/auth/send-code",
-		middleware.RateLimit(testCache, nil, "/auth/send-code",
-			cfg.RateLimit.IP.SendCodeMaxAttempts, cfg.RateLimit.IP.SendCodeWindowSec,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.SendCode(pool, nil, cfg))
-
-	// CRIT-2 + HIGH-2: verify endpoints require auth and have rate limiting
-	authRequired.POST("/auth/verify/email",
-		middleware.RateLimit(testCache, nil, "/auth/verify/email",
-			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyEmail(pool, cfg, testCache))
-	authRequired.POST("/auth/verify/phone",
-		middleware.RateLimit(testCache, nil, "/auth/verify/phone",
-			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyPhone(pool, cfg, testCache))
+	moduleDB := rgdb.NewDB(pool)
+	generator := rg.NewGenerator(
+		func(*rg.BaseModule) rgdb.DBExecutor { return moduleDB },
+		*r.Group("/"),
+		[]*rg.BaseModule{authmodules.ContactVerificationsModule(pool, nil, testCache, cfg), authmodules.AccountSecurityModule(pool, cfg)},
+		func(_ actions.ModuleAction, roles []actions.Role) gin.HandlerFunc {
+			allowed := make([]string, 0, len(roles))
+			for _, role := range roles {
+				allowed = append(allowed, string(role))
+			}
+			return middleware.RequireRole(allowed...)
+		},
+		func(actions.ModuleAction) gin.HandlerFunc { return middleware.Auth(pool, testCache) },
+	)
+	generator.Locales = []locale.Lang{locale.RU, locale.EN}
+	generator.DefaultLocale = locale.EN
+	if err := generator.LoadTranslationsFile(locale.RU, filepath.Join(repoRoot(), "locales/ru.json")); err != nil {
+		panic(err)
+	}
+	if err := generator.LoadTranslationsFile(locale.EN, filepath.Join(repoRoot(), "locales/en.json")); err != nil {
+		panic(err)
+	}
+	generator.Run()
 
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")
@@ -140,6 +152,7 @@ func truncateTables(t *testing.T) {
 
 	// Execute each statement separately — pgx doesn't support multi-statement in one Exec
 	statements := []string{
+		`DELETE FROM contact_verifications`,
 		`DELETE FROM confirm_codes`,
 		`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE role != 'system')`,
 		`DELETE FROM users WHERE role != 'system'`,
@@ -222,21 +235,6 @@ func registerUser(t *testing.T, login, password string) string {
 	return token
 }
 
-// getConfirmCode reads the verification code directly from DB for the given recipient+device.
-func getConfirmCode(t *testing.T, recipient, deviceUID string) string {
-	t.Helper()
-	ctx := context.Background()
-	var code string
-	err := testPool.QueryRowContext(ctx,
-		`SELECT code FROM confirm_codes WHERE recipient=$1 AND device_uid=$2 LIMIT 1`,
-		recipient, deviceUID,
-	).Scan(&code)
-	if err != nil {
-		t.Fatalf("getConfirmCode(%s, %s): %v", recipient, deviceUID, err)
-	}
-	return code
-}
-
 // createTempSession inserts a temporary session for an unverified user and returns the token.
 // Used for testing verify endpoints that now require authentication.
 func createTempSession(t *testing.T, recipient string) string {
@@ -269,11 +267,12 @@ func createTempSession(t *testing.T, recipient string) string {
 	return token
 }
 
-// verifyUser sends a code and verifies the recipient via email or phone endpoint.
-// Uses the registration_token returned by registerUser for authentication.
-// token is the registration_token from registerUser(); if empty, falls back to createTempSession.
+// verifyUser completes the same generator-backed contact verification route
+// that browser registration and account settings use. Tests replace the
+// one-time hash only inside the isolated test database.
 func verifyUser(t *testing.T, recipient, deviceUID string, registrationToken ...string) {
 	t.Helper()
+	_ = deviceUID
 
 	// Use registration token if provided, otherwise fall back to temporary session
 	var authToken string
@@ -283,30 +282,27 @@ func verifyUser(t *testing.T, recipient, deviceUID string, registrationToken ...
 		authToken = createTempSession(t, recipient)
 	}
 
-	// NEW-2: /auth/send-code now requires auth token
-	w := doRequest("POST", "/auth/send-code", map[string]string{
-		"recipient":  recipient,
-		"device_uid": deviceUID,
-	}, authToken)
-	if w.Code != http.StatusOK {
-		t.Fatalf("verifyUser send-code(%s): expected 200, got %d: %s", recipient, w.Code, w.Body.String())
+	var verificationID int64
+	if err := testPool.QueryRowContext(context.Background(), `
+		SELECT cv.id
+		FROM contact_verifications cv
+		JOIN users u ON u.id=cv.user_id
+		WHERE cv.recipient=$1
+		ORDER BY cv.id DESC
+		LIMIT 1`, recipient).Scan(&verificationID); err != nil {
+		t.Fatalf("verifyUser load contact verification(%s): %v", recipient, err)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("verifyUser hash code: %v", err)
+	}
+	if _, err = testPool.ExecContext(context.Background(), `UPDATE contact_verifications SET code_hash=$1 WHERE id=$2`, string(hash), verificationID); err != nil {
+		t.Fatalf("verifyUser set test code: %v", err)
 	}
 
-	// Get code from DB
-	code := getConfirmCode(t, recipient, deviceUID)
-
-	endpoint := "/auth/verify/phone"
-	if strings.Contains(recipient, "@") {
-		endpoint = "/auth/verify/email"
-	}
-
-	w = doRequest("POST", endpoint, map[string]string{
-		"recipient":  recipient,
-		"code":       code,
-		"device_uid": deviceUID,
-	}, authToken)
+	w := doRequest("POST", "/auth/contact_verifications/id/"+strconv.FormatInt(verificationID, 10), map[string]string{"code": "123456"}, authToken)
 	if w.Code != http.StatusOK {
-		t.Fatalf("verifyUser verify(%s): expected 200, got %d: %s", recipient, w.Code, w.Body.String())
+		t.Fatalf("verifyUser confirm(%s): expected 200, got %d: %s", recipient, w.Code, w.Body.String())
 	}
 }
 

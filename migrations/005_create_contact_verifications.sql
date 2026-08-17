@@ -8,8 +8,9 @@ CREATE TABLE IF NOT EXISTS contact_verifications (
     device_uid     TEXT NOT NULL,
     provider       TEXT,
     allow_fallback BOOLEAN NOT NULL DEFAULT TRUE,
+    purpose        TEXT NOT NULL DEFAULT 'verification',
     status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'expired')),
-    code           TEXT NOT NULL,
+    code_hash      TEXT NOT NULL,
     counter        INTEGER NOT NULL DEFAULT 0,
     sent_ts        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at     TIMESTAMPTZ NOT NULL,
@@ -17,6 +18,3 @@ CREATE TABLE IF NOT EXISTS contact_verifications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_contact_verifications_user ON contact_verifications(user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_verifications_pending_contact
-    ON contact_verifications(user_id, contact_type)
-    WHERE status = 'pending';

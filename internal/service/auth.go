@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/validator"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
@@ -302,15 +303,19 @@ func Logout(ctx context.Context, pool *sql.DB, cacheClient *cache.Client, token 
 
 // RegisterRequest holds the registration input.
 type RegisterRequest struct {
-	Login    string
-	Password string
-	Role     string
+	Login         string
+	Password      string
+	Role          string
+	DeviceUID     string
+	Provider      string
+	AllowFallback bool
 }
 
 // RegisterResult holds the result of a successful registration.
 type RegisterResult struct {
 	RegistrationToken string
 	ExpiresIn         int
+	VerificationID    int64
 }
 
 // Register validates, hashes password, inserts user and publishes a verification event.
@@ -409,6 +414,11 @@ func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 		return nil, fmt.Errorf("token generation: %w", err)
 	}
 	registrationToken := hex.EncodeToString(tokenBytes)
+	if strings.TrimSpace(req.DeviceUID) == "" {
+		// API clients that do not have a stable device identifier still receive a
+		// token-scoped delivery request; browser clients always send device_uid.
+		req.DeviceUID = "registration:" + registrationToken
+	}
 
 	ttlMin := cfg.RegistrationTokenTTLMin
 	if ttlMin <= 0 {
@@ -427,13 +437,23 @@ func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 		}
 	}
 
-	if err := SendCode(ctx, pool, conn, cfg, req.Login, "registration:"+registrationToken, "", true, userID); err != nil {
+	contactType := "phone"
+	if isEmail {
+		contactType = "email"
+	}
+	verificationID, err := CreateContactVerification(ctx, pool, conn, cfg, ContactVerificationRequest{
+		UserID: userID, ContactType: contactType, Recipient: req.Login,
+		DeviceUID: req.DeviceUID, Provider: req.Provider, AllowFallback: req.AllowFallback,
+		Purpose: delivery.PurposeRegistrationVerification,
+	})
+	if err != nil {
 		return nil, fmt.Errorf("send registration verification code: %w", err)
 	}
 
 	return &RegisterResult{
 		RegistrationToken: registrationToken,
 		ExpiresIn:         expiresIn,
+		VerificationID:    verificationID,
 	}, nil
 }
 
