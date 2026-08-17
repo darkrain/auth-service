@@ -11,7 +11,7 @@ func getResetCode(t *testing.T, login, deviceUID string) string {
 	t.Helper()
 	ctx := context.Background()
 	var code string
-	err := testPool.QueryRow(ctx,
+	err := testPool.QueryRowContext(ctx,
 		`SELECT code FROM confirm_codes WHERE recipient=$1 AND device_uid=$2 AND auth_type='password_reset' LIMIT 1`,
 		login, deviceUID,
 	).Scan(&code)
@@ -37,7 +37,7 @@ func TestPasswordReset_HappyPath(t *testing.T) {
 
 	// Step 1: request password reset
 	w := doRequestWithDevice("POST", "/auth/password/reset-request", map[string]string{
-		"login":     login,
+		"login":      login,
 		"device_uid": deviceUID,
 	}, "", deviceUID)
 	if w.Code != http.StatusOK {
@@ -91,7 +91,7 @@ func TestPasswordReset_WrongCode(t *testing.T) {
 
 	// Request reset
 	w := doRequestWithDevice("POST", "/auth/password/reset-request", map[string]string{
-		"login":     login,
+		"login":      login,
 		"device_uid": deviceUID,
 	}, "", deviceUID)
 	if w.Code != http.StatusOK {
@@ -119,7 +119,7 @@ func TestPasswordReset_NonExistentUser(t *testing.T) {
 	truncateTables(t)
 
 	w := doRequestWithDevice("POST", "/auth/password/reset-request", map[string]string{
-		"login":     "nobody@nonexistent.example.com",
+		"login":      "nobody@nonexistent.example.com",
 		"device_uid": "device-reset-nouser",
 	}, "", "device-reset-nouser")
 	if w.Code != http.StatusOK {
@@ -140,7 +140,7 @@ func TestPasswordReset_WeakPassword(t *testing.T) {
 
 	// Request reset
 	w := doRequestWithDevice("POST", "/auth/password/reset-request", map[string]string{
-		"login":     login,
+		"login":      login,
 		"device_uid": deviceUID,
 	}, "", deviceUID)
 	if w.Code != http.StatusOK {
@@ -186,7 +186,7 @@ func TestPasswordReset_SessionsInvalidated(t *testing.T) {
 
 	// Request password reset
 	w = doRequestWithDevice("POST", "/auth/password/reset-request", map[string]string{
-		"login":     login,
+		"login":      login,
 		"device_uid": deviceUID,
 	}, "", deviceUID)
 	if w.Code != http.StatusOK {

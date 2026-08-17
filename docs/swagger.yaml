@@ -14,14 +14,20 @@ definitions:
     type: object
   handler.errorResponse:
     properties:
+      code:
+        example: ERR_INVALID_REQUEST
+        type: string
       error:
         example: error description
         type: string
     type: object
   handler.login2FAResponse:
     properties:
+      challenge_token:
+        example: short-lived-login-challenge
+        type: string
       message:
-        example: Code sent to your email/phone. Please verify.
+        example: Enter the code from your authenticator app.
         type: string
       requires_2fa:
         example: true
@@ -59,9 +65,6 @@ definitions:
       phone:
         example: "+79001234567"
         type: string
-      role:
-        example: user
-        type: string
       verify_status:
         example: verified
         type: string
@@ -74,35 +77,43 @@ definitions:
     type: object
   handler.registerRequest:
     properties:
+      allow_fallback:
+        type: boolean
+      device_uid:
+        example: device-uuid-1234
+        type: string
       login:
         example: user@example.com
         type: string
       password:
         example: Secret123!
         type: string
+      provider:
+        example: telegram
+        type: string
+      role:
+        example: model
+        type: string
     type: object
-  handler.sendCodeRequest:
+  handler.registerResponse:
     properties:
-      device_uid:
-        example: device-uuid-1234
+      expires_in:
+        example: 1800
+        type: integer
+      message:
+        example: Registration successful. Please verify your email/phone.
         type: string
-      recipient:
-        example: user@example.com
+      registration_token:
+        example: a3f2c1...hex64
         type: string
+      resend_after_sec:
+        example: 60
+        type: integer
+      verification_id:
+        example: 42
+        type: integer
     type: object
-  handler.verifyCodeRequest:
-    properties:
-      code:
-        example: "123456"
-        type: string
-      device_uid:
-        example: device-uuid-1234
-        type: string
-      recipient:
-        example: user@example.com
-        type: string
-    type: object
-  handler.verifyLogin2FARequest:
+  handler.resetConfirmBody:
     properties:
       code:
         example: "123456"
@@ -112,6 +123,30 @@ definitions:
         type: string
       login:
         example: user@example.com
+        type: string
+      new_password:
+        example: NewSecret123!
+        type: string
+    type: object
+  handler.resetRequestBody:
+    properties:
+      device_uid:
+        example: device-uuid-1234
+        type: string
+      login:
+        example: user@example.com
+        type: string
+    type: object
+  handler.verifyLogin2FARequest:
+    properties:
+      challenge_token:
+        example: short-lived-login-challenge
+        type: string
+      code:
+        example: "123456"
+        type: string
+      device_uid:
+        example: device-uuid-1234
         type: string
     type: object
 host: localhost:8080
@@ -119,8 +154,8 @@ info:
   contact:
     name: darkrain
     url: https://github.com/darkrain/auth-service
-  description: Authentication and authorization microservice with JWT sessions, 2FA,
-    and API key management.
+  description: Authentication and authorization microservice with opaque sessions,
+    2FA, and API key management.
   license:
     name: MIT
   termsOfService: http://swagger.io/terms/
@@ -219,7 +254,7 @@ paths:
       consumes:
       - application/json
       description: Authenticates a user by login (email or phone) and password. Returns
-        a JWT token on success, or 202 if 2FA is required.
+        an opaque session token on success, or 202 if TOTP verification is required.
       parameters:
       - description: Login credentials
         in: body
@@ -269,10 +304,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Completes the login process by verifying a 2FA code. Returns a
-        JWT token on success.
+      description: Completes the password-authenticated login challenge with a TOTP
+        code from an authenticator app.
       parameters:
-      - description: Login, 2FA code and device UID
+      - description: Challenge token, authenticator code and device UID
         in: body
         name: request
         required: true
@@ -350,12 +385,79 @@ paths:
       summary: Get current user info
       tags:
       - auth
+  /auth/password/reset-confirm:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the reset code and sets a new password. Invalidates all
+        existing sessions.
+      parameters:
+      - description: Login, code, device UID and new password
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.resetConfirmBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Confirm password reset
+      tags:
+      - password-reset
+  /auth/password/reset-request:
+    post:
+      consumes:
+      - application/json
+      description: Sends a one-time password reset code to the user's email or phone.
+        Always returns 200 to avoid user enumeration.
+      parameters:
+      - description: Login and device UID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.resetRequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.messageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      summary: Request password reset code
+      tags:
+      - password-reset
   /auth/register:
     post:
       consumes:
       - application/json
       description: Creates a new user account. Login can be an email address or a
-        phone number. A verification code will be sent to the provided contact.
+        phone number. Returns a short-lived registration_token to authenticate verification
+        calls.
       parameters:
       - description: Registration data
         in: body
@@ -369,7 +471,7 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/handler.messageResponse'
+            $ref: '#/definitions/handler.registerResponse'
         "400":
           description: Bad Request
           schema:
@@ -381,119 +483,9 @@ paths:
       summary: Register a new user
       tags:
       - auth
-  /auth/send-code:
-    post:
-      consumes:
-      - application/json
-      description: Sends a verification code to the specified email or phone number.
-      parameters:
-      - description: Recipient and device UID
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/handler.sendCodeRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handler.messageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-        "429":
-          description: Too Many Requests
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-      summary: Send verification code
-      tags:
-      - verification
-  /auth/verify/email:
-    post:
-      consumes:
-      - application/json
-      description: Verifies a user's email address using a code sent to them.
-      parameters:
-      - description: Email, code and device UID
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/handler.verifyCodeRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handler.messageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-        "429":
-          description: Too Many Requests
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-      summary: Verify email address
-      tags:
-      - verification
-  /auth/verify/phone:
-    post:
-      consumes:
-      - application/json
-      description: Verifies a user's phone number using a code sent to them.
-      parameters:
-      - description: Phone, code and device UID
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/handler.verifyCodeRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handler.messageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-        "429":
-          description: Too Many Requests
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handler.errorResponse'
-      summary: Verify phone number
-      tags:
-      - verification
 securityDefinitions:
   BearerAuth:
-    description: Type "Bearer" followed by a space and the JWT token.
+    description: Type "Bearer" followed by a space and the session token.
     in: header
     name: Authorization
     type: apiKey

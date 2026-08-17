@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strings"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -37,7 +37,7 @@ type resetConfirmBody struct {
 //	@Failure		400		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/password/reset-request [post]
-func ResetRequest(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
+func ResetRequest(pool *sql.DB, conn *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req resetRequestBody
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -78,7 +78,7 @@ func ResetRequest(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config,
 //	@Failure		404		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/password/reset-confirm [post]
-func ResetConfirm(pool *pgxpool.Pool, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
+func ResetConfirm(pool *sql.DB, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req resetConfirmBody
 		if err := c.ShouldBindJSON(&req); err != nil {

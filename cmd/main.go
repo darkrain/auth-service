@@ -2,7 +2,7 @@
 //
 //	@title			Auth Service API
 //	@version		1.0
-//	@description	Authentication and authorization microservice with JWT sessions, 2FA, and API key management.
+//	@description	Authentication and authorization microservice with opaque sessions, 2FA, and API key management.
 //	@termsOfService	http://swagger.io/terms/
 //
 //	@contact.name	darkrain
@@ -16,7 +16,7 @@
 //	@securityDefinitions.apikey	BearerAuth
 //	@in							header
 //	@name						Authorization
-//	@description				Type "Bearer" followed by a space and the JWT token.
+//	@description				Type "Bearer" followed by a space and the session token.
 package main
 
 import (
@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"database/sql"
 	_ "github.com/darkrain/auth-service/docs"
 	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
@@ -37,8 +38,13 @@ import (
 	"github.com/darkrain/auth-service/internal/db"
 	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/middleware"
+	authmodules "github.com/darkrain/auth-service/internal/modules"
+	rg "github.com/darkrain/request-generator"
+	"github.com/darkrain/request-generator/actions"
+	rgdb "github.com/darkrain/request-generator/db"
+	"github.com/darkrain/request-generator/locale"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
+	amqp "github.com/rabbitmq/amqp091-go"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -71,7 +77,7 @@ func main() {
 	defer cancel()
 
 	// PostgreSQL
-	var pgPool *pgxpool.Pool
+	var pgPool *sql.DB
 	rawPool, err := db.Connect(cfg)
 	if err != nil {
 		log.Printf("WARNING: PostgreSQL not available: %v", err)
@@ -105,13 +111,16 @@ func main() {
 		}
 	}()
 
-	// RabbitMQ
-	rmqConn, err := broker.Connect(cfg)
-	if err != nil {
-		log.Printf("WARNING: RabbitMQ not available: %v", err)
-	} else {
-		defer rmqConn.Close()
-		log.Println("RabbitMQ connected")
+	// RabbitMQ is not needed in explicitly isolated test mode.
+	var rmqConn *amqp.Connection
+	if cfg.MessageBroker.PublishMode != "disabled" {
+		rmqConn, err = broker.Connect(cfg)
+		if err != nil {
+			log.Printf("WARNING: RabbitMQ not available: %v", err)
+		} else {
+			defer rmqConn.Close()
+			log.Println("RabbitMQ connected")
+		}
 	}
 
 	// HTTP server
@@ -177,7 +186,7 @@ func main() {
 		middleware.RateLimit(cacheClient, rmqConn, "/auth/login/verify-2fa",
 			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyLogin2FA(pgPool, cfg))
+		handler.VerifyLogin2FA(pgPool, cfg, cacheClient))
 
 	// Password reset (public — no auth required)
 	r.POST("/auth/password/reset-request",
@@ -195,12 +204,6 @@ func main() {
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pgPool, cacheClient))
 
-	authRequired.POST("/auth/send-code",
-		middleware.RateLimit(cacheClient, rmqConn, "/auth/send-code",
-			cfg.RateLimit.IP.SendCodeMaxAttempts, cfg.RateLimit.IP.SendCodeWindowSec,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.SendCode(pgPool, rmqConn, cfg))
-
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")
 	apiKeys.Use(middleware.RequireRole("admin", "system"))
@@ -208,17 +211,38 @@ func main() {
 	apiKeys.GET("", handler.ListAPIKeys(pgPool))
 	apiKeys.DELETE("/:id", handler.RevokeAPIKey(pgPool, cacheClient))
 
-	// CRIT-2 + HIGH-2: verify endpoints require auth and have rate limiting
-	authRequired.POST("/auth/verify/email",
-		middleware.RateLimit(cacheClient, rmqConn, "/auth/verify/email",
-			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyEmail(pgPool, cfg, cacheClient))
-	authRequired.POST("/auth/verify/phone",
-		middleware.RateLimit(cacheClient, rmqConn, "/auth/verify/phone",
-			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
-			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyPhone(pgPool, cfg, cacheClient))
+	if pgPool != nil {
+		moduleDB := rgdb.NewDB(pgPool)
+		generator := rg.NewGenerator(
+			func(*rg.BaseModule) rgdb.DBExecutor { return moduleDB },
+			*r.Group("/"),
+			[]*rg.BaseModule{
+				authmodules.ContactVerificationsModule(pgPool, rmqConn, cacheClient, cfg),
+				authmodules.AccountSecurityModule(pgPool, cfg),
+				authmodules.AccountPasswordModule(pgPool, cacheClient, cfg),
+				authmodules.AccountTwoFactorModule(pgPool, cacheClient, cfg),
+				authmodules.AccountSessionsModule(pgPool, cacheClient, cfg),
+				authmodules.AccountDeactivationModule(pgPool, cacheClient, cfg),
+			},
+			func(_ actions.ModuleAction, roles []actions.Role) gin.HandlerFunc {
+				allowed := make([]string, 0, len(roles))
+				for _, role := range roles {
+					allowed = append(allowed, string(role))
+				}
+				return middleware.RequireRole(allowed...)
+			},
+			func(actions.ModuleAction) gin.HandlerFunc { return middleware.Auth(pgPool, cacheClient) },
+		)
+		generator.Locales = []locale.Lang{locale.RU, locale.EN}
+		generator.DefaultLocale = locale.EN
+		if err := generator.LoadTranslationsFile(locale.RU, "locales/ru.json"); err != nil {
+			log.Printf("WARNING: load ru generator translations: %v", err)
+		}
+		if err := generator.LoadTranslationsFile(locale.EN, "locales/en.json"); err != nil {
+			log.Printf("WARNING: load en generator translations: %v", err)
+		}
+		generator.Run()
+	}
 
 	// Authenticated user info
 	authRequired.GET("/auth/me", handler.Me())

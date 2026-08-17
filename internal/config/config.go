@@ -32,8 +32,9 @@ type RateLimitAccount struct {
 }
 
 type RateLimitCode struct {
-	MaxAttempts int `json:"MaxAttempts"`
-	TTLSec      int `json:"TTLSec"`
+	MaxAttempts       int `json:"MaxAttempts"`
+	TTLSec            int `json:"TTLSec"`
+	ResendCooldownSec int `json:"ResendCooldownSec"`
 }
 
 type RateLimit struct {
@@ -48,42 +49,70 @@ type TestAccount struct {
 	Code  string `json:"code"`
 }
 
+type MessageBrokerConfig struct {
+	Host         string                   `json:"Host"`
+	User         string                   `json:"User"`
+	Password     string                   `json:"Password"`
+	ExchangeName string                   `json:"ExchangeName"`
+	ExchangeKind string                   `json:"ExchangeKind"`
+	PublishMode  string                   `json:"PublishMode"`
+	RoutingKeys  MessageBrokerRoutingKeys `json:"RoutingKeys"`
+}
+
+type MessageBrokerRoutingKeys struct {
+	DeliveryRequested string `json:"DeliveryRequested"`
+}
+
+type CodeDeliveryConfig struct {
+	Email                   CodeDeliveryEmailConfig `json:"Email"`
+	Phone                   CodeDeliveryPhoneConfig `json:"Phone"`
+	PublishTestAccountCodes bool                    `json:"PublishTestAccountCodes"`
+}
+
+type CodeDeliveryEmailConfig struct {
+	DefaultProvider  string   `json:"DefaultProvider"`
+	AllowedProviders []string `json:"AllowedProviders"`
+}
+
+type CodeDeliveryPhoneConfig struct {
+	DefaultProviderChain []string `json:"DefaultProviderChain"`
+	AllowedProviders     []string `json:"AllowedProviders"`
+}
+
 type Config struct {
-	Host                          string        `json:"Host"`
-	Port                          string        `json:"Port"`
-	PasswordSalt                  string        `json:"PasswordSalt"`
-	PasswordMinLength             int           `json:"PasswordMinLength"`
-	PasswordRequireDigits         bool          `json:"PasswordRequireDigits"`
-	PasswordRequireSpecial        bool          `json:"PasswordRequireSpecial"`
-	SystemUserEmail               string        `json:"SystemUserEmail"`
-	SystemUserPassword            string        `json:"SystemUserPassword"`
-	PostgreSqlHost                string        `json:"PostgreSqlHost"`
-	PostgreSqlPort                string        `json:"PostgreSqlPort"`
-	PostgreSqlUserName            string        `json:"PostgreSqlUserName"`
-	PostgreSqlPassword            string        `json:"PostgreSqlPassword"`
-	PostgreSqlDatabase            string        `json:"PostgreSqlDatabase"`
-	RedisDatabaseNetwork          string        `json:"RedisDatabaseNetwork"`
-	RedisDatabaseHost             string        `json:"RedisDatabaseHost"`
-	RedisDatabasePort             string        `json:"RedisDatabasePort"`
-	RedisPassword                 string        `json:"RedisPassword"`
-	RmqHost                       string        `json:"RmqHost"`
-	RmqUser                       string        `json:"RmqUser"`
-	RmqPassword                   string        `json:"RmqPassword"`
-	RmqQueueMailName              string        `json:"RmqQueueMailName"`
-	RmqExchangeName               string        `json:"RmqExchangeName"`
-	RmqExchangeKind               string        `json:"RmqExchangeKind"`
-	RateLimit                     RateLimit     `json:"RateLimit"`
-	SessionTTLDays                int           `json:"SessionTTLDays"`
-	RegistrationTokenTTLMin       int           `json:"RegistrationTokenTTLMin"`
-	TwoFactorEnabled              bool          `json:"TwoFactorEnabled"`
-	PasswordResetCodeTTLMin       int           `json:"PasswordResetCodeTTLMin"`
-	PasswordResetRateLimitPerHour int           `json:"PasswordResetRateLimitPerHour"`
-	TrustedProxies                []string      `json:"TrustedProxies"`
-	AllowedOrigins                []string      `json:"AllowedOrigins"`
-	PostgreSQLSSLMode             string        `json:"PostgreSQLSSLMode"`
-	SwaggerEnabled                bool          `json:"SwaggerEnabled"`
-	TestAccounts                  []TestAccount `json:"TestAccounts"`
-	AllowedRoles                  []string      `json:"AllowedRoles"`
+	Host                          string              `json:"Host"`
+	Port                          string              `json:"Port"`
+	PasswordSalt                  string              `json:"PasswordSalt"`
+	PasswordMinLength             int                 `json:"PasswordMinLength"`
+	PasswordRequireDigits         bool                `json:"PasswordRequireDigits"`
+	PasswordRequireSpecial        bool                `json:"PasswordRequireSpecial"`
+	SystemUserEmail               string              `json:"SystemUserEmail"`
+	SystemUserPassword            string              `json:"SystemUserPassword"`
+	PostgreSqlHost                string              `json:"PostgreSqlHost"`
+	PostgreSqlPort                string              `json:"PostgreSqlPort"`
+	PostgreSqlUserName            string              `json:"PostgreSqlUserName"`
+	PostgreSqlPassword            string              `json:"PostgreSqlPassword"`
+	PostgreSqlDatabase            string              `json:"PostgreSqlDatabase"`
+	RedisDatabaseNetwork          string              `json:"RedisDatabaseNetwork"`
+	RedisDatabaseHost             string              `json:"RedisDatabaseHost"`
+	RedisDatabasePort             string              `json:"RedisDatabasePort"`
+	RedisPassword                 string              `json:"RedisPassword"`
+	MessageBroker                 MessageBrokerConfig `json:"MessageBroker"`
+	CodeDelivery                  CodeDeliveryConfig  `json:"CodeDelivery"`
+	RateLimit                     RateLimit           `json:"RateLimit"`
+	SessionTTLDays                int                 `json:"SessionTTLDays"`
+	RegistrationTokenTTLMin       int                 `json:"RegistrationTokenTTLMin"`
+	TwoFactorEnabled              bool                `json:"TwoFactorEnabled"`
+	TwoFactorIssuer               string              `json:"TwoFactorIssuer"`
+	TwoFactorEncryptionKey        string              `json:"TwoFactorEncryptionKey"`
+	PasswordResetCodeTTLMin       int                 `json:"PasswordResetCodeTTLMin"`
+	PasswordResetRateLimitPerHour int                 `json:"PasswordResetRateLimitPerHour"`
+	TrustedProxies                []string            `json:"TrustedProxies"`
+	AllowedOrigins                []string            `json:"AllowedOrigins"`
+	PostgreSQLSSLMode             string              `json:"PostgreSQLSSLMode"`
+	SwaggerEnabled                bool                `json:"SwaggerEnabled"`
+	TestAccounts                  []TestAccount       `json:"TestAccounts"`
+	AllowedRoles                  []string            `json:"AllowedRoles"`
 }
 
 func Load(path string) (*Config, error) {
@@ -98,7 +127,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: decode %q: %w", path, err)
 	}
 
-	// Default PostgreSQLSSLMode to "disable" if not set (backward compatible)
+	// Default PostgreSQLSSLMode to "disable" if not set.
 	if cfg.PostgreSQLSSLMode == "" {
 		cfg.PostgreSQLSSLMode = "disable"
 	}
@@ -112,8 +141,48 @@ func Load(path string) (*Config, error) {
 	if cfg.PasswordResetRateLimitPerHour == 0 {
 		cfg.PasswordResetRateLimitPerHour = 3
 	}
+	if cfg.RateLimit.Code.ResendCooldownSec == 0 {
+		cfg.RateLimit.Code.ResendCooldownSec = 60
+	}
+	if cfg.TwoFactorIssuer == "" {
+		cfg.TwoFactorIssuer = "Auth Service"
+	}
+	cfg.setMessageDefaults()
 
 	return &cfg, nil
+}
+
+func (c *Config) setMessageDefaults() {
+	if c.MessageBroker.Host == "" {
+		c.MessageBroker.Host = "127.0.0.1:5672"
+	}
+	if c.MessageBroker.User == "" {
+		c.MessageBroker.User = "guest"
+	}
+	if c.MessageBroker.ExchangeName == "" {
+		c.MessageBroker.ExchangeName = "messages.events"
+	}
+	if c.MessageBroker.ExchangeKind == "" {
+		c.MessageBroker.ExchangeKind = "topic"
+	}
+	if c.MessageBroker.PublishMode == "" {
+		c.MessageBroker.PublishMode = "required"
+	}
+	if c.MessageBroker.RoutingKeys.DeliveryRequested == "" {
+		c.MessageBroker.RoutingKeys.DeliveryRequested = "message.delivery.requested"
+	}
+	if c.CodeDelivery.Email.DefaultProvider == "" {
+		c.CodeDelivery.Email.DefaultProvider = "email"
+	}
+	if len(c.CodeDelivery.Email.AllowedProviders) == 0 {
+		c.CodeDelivery.Email.AllowedProviders = []string{c.CodeDelivery.Email.DefaultProvider}
+	}
+	if len(c.CodeDelivery.Phone.DefaultProviderChain) == 0 {
+		c.CodeDelivery.Phone.DefaultProviderChain = []string{"telegram", "whatsapp", "sms"}
+	}
+	if len(c.CodeDelivery.Phone.AllowedProviders) == 0 {
+		c.CodeDelivery.Phone.AllowedProviders = append([]string(nil), c.CodeDelivery.Phone.DefaultProviderChain...)
+	}
 }
 
 // Validate checks that critical config fields are present.
@@ -154,6 +223,20 @@ func (c *Config) Validate() error {
 	if c.PasswordResetRateLimitPerHour <= 0 {
 		return errors.New("config: PasswordResetRateLimitPerHour must be greater than 0")
 	}
+	if c.TwoFactorEnabled && c.TwoFactorEncryptionKey == "" {
+		return errors.New("config: TwoFactorEncryptionKey must not be empty when TwoFactorEnabled is enabled")
+	}
+	if c.MessageBroker.Host == "" || c.MessageBroker.ExchangeName == "" || c.MessageBroker.ExchangeKind == "" || c.MessageBroker.RoutingKeys.DeliveryRequested == "" {
+		return errors.New("config: MessageBroker configuration is incomplete")
+	}
+	switch c.MessageBroker.PublishMode {
+	case "required", "best_effort", "disabled":
+	default:
+		return errors.New("config: MessageBroker.PublishMode must be required, best_effort, or disabled")
+	}
+	if len(c.CodeDelivery.Email.AllowedProviders) == 0 || len(c.CodeDelivery.Phone.AllowedProviders) == 0 || len(c.CodeDelivery.Phone.DefaultProviderChain) == 0 {
+		return errors.New("config: CodeDelivery provider configuration is incomplete")
+	}
 
 	for _, role := range c.AllowedRoles {
 		if role == "admin" || role == "system" {
@@ -161,6 +244,29 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (c *Config) CodeProviderChain(recipientType string) []string {
+	if recipientType == "email" {
+		return []string{c.CodeDelivery.Email.DefaultProvider}
+	}
+	return append([]string(nil), c.CodeDelivery.Phone.DefaultProviderChain...)
+}
+
+func (c *Config) IsAllowedCodeProvider(recipientType, provider string) bool {
+	if provider == "" {
+		return true
+	}
+	allowed := c.CodeDelivery.Phone.AllowedProviders
+	if recipientType == "email" {
+		allowed = c.CodeDelivery.Email.AllowedProviders
+	}
+	for _, item := range allowed {
+		if item == provider {
+			return true
+		}
+	}
+	return false
 }
 
 // IsValidRole returns true if the given role is a built-in reserved role (admin, system)

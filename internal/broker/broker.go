@@ -9,15 +9,15 @@ import (
 
 func Connect(cfg *config.Config) (*amqp.Connection, error) {
 	url := fmt.Sprintf("amqp://%s:%s@%s/",
-		cfg.RmqUser,
-		cfg.RmqPassword,
-		cfg.RmqHost,
+		cfg.MessageBroker.User,
+		cfg.MessageBroker.Password,
+		cfg.MessageBroker.Host,
 	)
 
 	conn, err := amqp.Dial(url)
 	if err != nil {
 		// LOW: redact password from URL before logging — only log host
-		return nil, fmt.Errorf("broker: dial %s: %w", cfg.RmqHost, err)
+		return nil, fmt.Errorf("broker: dial %s: %w", cfg.MessageBroker.Host, err)
 	}
 
 	return conn, nil

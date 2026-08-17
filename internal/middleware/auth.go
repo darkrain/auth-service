@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Error code constants for middleware responses
@@ -20,7 +20,7 @@ const (
 // Auth middleware validates Bearer token or X-API-Key header.
 // It checks the Redis cache first; on cache miss it queries the sessions table,
 // then caches the result with TTL = expire_date - now.
-func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
+func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var token string
 
@@ -43,21 +43,26 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		// 1. Check Redis cache
 		if cacheClient != nil {
 			if sd, err := cacheClient.GetSession(c.Request.Context(), token); err == nil && sd != nil {
+				if sd.AuthType != "registration" && sd.VerifyStatus != "verified" {
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account is not active", "code": codeUnauthorized})
+					return
+				}
 				// Restrict registration tokens
 				if sd.AuthType == "registration" {
-					path := c.FullPath()
-					if path != "/auth/verify/email" && path != "/auth/verify/phone" && path != "/auth/send-code" {
+					if !registrationVerificationRequest(c.Request.Method, c.FullPath()) {
 						c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification", "code": codeRegistrationToken})
 						return
 					}
 				}
 				c.Set("user_id", sd.UserID)
+				c.Set("session_id", sd.SessionID)
 				c.Set("email", sd.Email)
 				c.Set("phone", sd.Phone)
 				c.Set("role", sd.Role)
 				c.Set("verify_status", sd.VerifyStatus)
 				c.Set("auth_type", sd.AuthType)
 				c.Set("token", token)
+				touchSession(c, pool, cacheClient, sd.SessionID, sd.AuthType)
 				c.Next()
 				return
 			}
@@ -69,17 +74,18 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 			return
 		}
 
+		var sessionID int64
 		var userID int
 		var email, phone, role, verifyStatus, authType string
 		var blocked bool
 		var expireDate *time.Time
 
-		err := pool.QueryRow(c.Request.Context(), `
-			SELECT s.user_id, COALESCE(u.email,''), COALESCE(u.phone,''), u.role, u.verify_status, s.blocked, s.expire_date, COALESCE(s.auth_type,'')
+		err := pool.QueryRowContext(c.Request.Context(), `
+			SELECT s.id, s.user_id, COALESCE(u.email,''), COALESCE(u.phone,''), u.role, u.verify_status, s.blocked, s.expire_date, COALESCE(s.auth_type,'')
 			FROM sessions s
 			JOIN users u ON u.id = s.user_id
 			WHERE s.token = $1
-		`, token).Scan(&userID, &email, &phone, &role, &verifyStatus, &blocked, &expireDate, &authType)
+		`, token).Scan(&sessionID, &userID, &email, &phone, &role, &verifyStatus, &blocked, &expireDate, &authType)
 
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token", "code": codeUnauthorized})
@@ -95,11 +101,14 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has expired", "code": codeUnauthorized})
 			return
 		}
+		if authType != "registration" && verifyStatus != "verified" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account is not active", "code": codeUnauthorized})
+			return
+		}
 
 		// Restrict registration tokens to verification endpoints only
 		if authType == "registration" {
-			path := c.FullPath()
-			if path != "/auth/verify/email" && path != "/auth/verify/phone" && path != "/auth/send-code" {
+			if !registrationVerificationRequest(c.Request.Method, c.FullPath()) {
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Registration token can only be used for account verification", "code": codeRegistrationToken})
 				return
 			}
@@ -108,6 +117,7 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		// 3. Store in Redis cache with TTL = expire_date - now
 		if cacheClient != nil {
 			sd := &cache.SessionData{
+				SessionID:    sessionID,
 				UserID:       userID,
 				Email:        email,
 				Phone:        phone,
@@ -132,15 +142,35 @@ func Auth(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
 		}
 
 		c.Set("user_id", userID)
+		c.Set("session_id", sessionID)
 		c.Set("email", email)
 		c.Set("phone", phone)
 		c.Set("role", role)
 		c.Set("verify_status", verifyStatus)
 		c.Set("auth_type", authType)
 		c.Set("token", token)
+		touchSession(c, pool, cacheClient, sessionID, authType)
 
 		c.Next()
 	}
+}
+
+func touchSession(c *gin.Context, pool *sql.DB, cacheClient *cache.Client, sessionID int64, authType string) {
+	if pool == nil || sessionID <= 0 || authType == "registration" {
+		return
+	}
+	if cacheClient != nil {
+		shouldUpdate, err := cacheClient.MarkSessionSeen(c.Request.Context(), sessionID, 5*time.Minute)
+		if err != nil || !shouldUpdate {
+			return
+		}
+	}
+	_, _ = pool.ExecContext(c.Request.Context(), `UPDATE sessions SET last_seen_at=NOW(), update_date=NOW() WHERE id=$1 AND blocked=false`, sessionID)
+}
+
+func registrationVerificationRequest(method, path string) bool {
+	return (method == http.MethodPost && path == "/auth/contact_verifications/:bykey/:value") ||
+		(method == http.MethodPut && path == "/auth/contact_verifications")
 }
 
 // RequireRole middleware checks that the authenticated user has one of the allowed roles.

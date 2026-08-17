@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strings"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -25,14 +25,18 @@ type loginResponse struct {
 }
 
 type login2FAResponse struct {
-	Message     string `json:"message" example:"Code sent to your email/phone. Please verify."`
-	Requires2FA bool   `json:"requires_2fa" example:"true"`
+	Message        string `json:"message" example:"Enter the code from your authenticator app."`
+	Requires2FA    bool   `json:"requires_2fa" example:"true"`
+	ChallengeToken string `json:"challenge_token" example:"short-lived-login-challenge"`
 }
 
 type registerRequest struct {
-	Login    string `json:"login" example:"user@example.com"`
-	Password string `json:"password" example:"Secret123!"`
-	Role     string `json:"role" example:"model"`
+	Login         string `json:"login" example:"user@example.com"`
+	Password      string `json:"password" example:"Secret123!"`
+	Role          string `json:"role" example:"model"`
+	DeviceUID     string `json:"device_uid" example:"device-uuid-1234"`
+	Provider      string `json:"provider,omitempty" example:"telegram"`
+	AllowFallback bool   `json:"allow_fallback"`
 }
 
 type messageResponse struct {
@@ -43,6 +47,8 @@ type registerResponse struct {
 	Message           string `json:"message" example:"Registration successful. Please verify your email/phone."`
 	RegistrationToken string `json:"registration_token" example:"a3f2c1...hex64"`
 	ExpiresIn         int    `json:"expires_in" example:"1800"`
+	VerificationID    int64  `json:"verification_id" example:"42"`
+	ResendAfterSec    int    `json:"resend_after_sec" example:"60"`
 }
 
 type errorResponse struct {
@@ -53,7 +59,7 @@ type errorResponse struct {
 // Login handles POST /auth/login
 //
 //	@Summary		Login with email/phone and password
-//	@Description	Authenticates a user by login (email or phone) and password. Returns a JWT token on success, or 202 if 2FA is required.
+//	@Description	Authenticates a user by login (email or phone) and password. Returns an opaque session token on success, or 202 if TOTP verification is required.
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
@@ -67,7 +73,7 @@ type errorResponse struct {
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/login [post]
-func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
+func Login(pool *sql.DB, _ *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req loginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -81,17 +87,9 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheC
 			ip = c.Request.RemoteAddr
 		}
 
-		result, err := service.Login(c.Request.Context(), pool, cfg, cacheClient, req.Login, req.Password, ip)
+		result, err := service.Login(c.Request.Context(), pool, cfg, cacheClient, req.Login, req.Password, req.DeviceUID, ip)
 		if err != nil {
 			switch {
-			case errors.Is(err, service.Err2FA):
-				// Send code and return 202 (userID=0 — not yet authenticated, skip ownership check)
-				_ = service.SendCode(c.Request.Context(), pool, conn, cfg, req.Login, req.DeviceUID, 0)
-				c.JSON(http.StatusAccepted, gin.H{
-					"message":      "Code sent to your email/phone. Please verify.",
-					"requires_2fa": true,
-					"code":         Code2FARequired,
-				})
 			case errors.Is(err, service.ErrAccountLocked):
 				c.JSON(http.StatusTooManyRequests, errResp(CodeAccountLocked, "Account temporarily locked due to too many failed attempts"))
 			case errors.Is(err, service.ErrValidation):
@@ -119,6 +117,15 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheC
 			}
 			return
 		}
+		if result.Requires2FA {
+			c.JSON(http.StatusAccepted, gin.H{
+				"message":         "Enter the code from your authenticator app.",
+				"requires_2fa":    true,
+				"challenge_token": result.ChallengeToken,
+				"code":            Code2FARequired,
+			})
+			return
+		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"token":       result.Token,
@@ -139,7 +146,7 @@ func Login(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config, cacheC
 //	@Failure		401	{object}	errorResponse
 //	@Failure		500	{object}	errorResponse
 //	@Router			/auth/logout [post]
-func Logout(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
+func Logout(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if !strings.HasPrefix(authHeader, "Bearer ") {
@@ -182,6 +189,7 @@ type meResponse struct {
 func Me() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
+		sessionID, _ := c.Get("session_id")
 		email, _ := c.Get("email")
 		phone, _ := c.Get("phone")
 		role, _ := c.Get("role")
@@ -189,6 +197,7 @@ func Me() gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"id":            userID,
+			"session_id":    sessionID,
 			"email":         email,
 			"phone":         phone,
 			"role":          role,
@@ -209,7 +218,7 @@ func Me() gin.HandlerFunc {
 //	@Failure		400		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/register [post]
-func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin.HandlerFunc {
+func Register(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req registerRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -227,9 +236,8 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 		}
 
 		result, err := service.Register(c.Request.Context(), pool, conn, cfg, service.RegisterRequest{
-			Login:    req.Login,
-			Password: req.Password,
-			Role:     req.Role,
+			Login: req.Login, Password: req.Password, Role: req.Role, DeviceUID: req.DeviceUID,
+			Provider: req.Provider, AllowFallback: req.AllowFallback,
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidEmail) {
@@ -267,6 +275,8 @@ func Register(pool *pgxpool.Pool, conn *amqp.Connection, cfg *config.Config) gin
 			"message":            "Registration successful. Please verify your " + loginType + ".",
 			"registration_token": result.RegistrationToken,
 			"expires_in":         result.ExpiresIn,
+			"verification_id":    result.VerificationID,
+			"resend_after_sec":   result.ResendAfterSec,
 		})
 	}
 }

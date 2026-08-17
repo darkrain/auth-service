@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strconv"
 
+	"database/sql"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type apiKeyResponse struct {
@@ -28,7 +28,7 @@ type apiKeyResponse struct {
 //	@Failure		401	{object}	errorResponse
 //	@Failure		500	{object}	errorResponse
 //	@Router			/auth/api-keys [post]
-func CreateAPIKey(pool *pgxpool.Pool) gin.HandlerFunc {
+func CreateAPIKey(pool *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
 		if !exists {
@@ -66,7 +66,7 @@ func CreateAPIKey(pool *pgxpool.Pool) gin.HandlerFunc {
 //	@Failure		401	{object}	errorResponse
 //	@Failure		500	{object}	errorResponse
 //	@Router			/auth/api-keys [get]
-func ListAPIKeys(pool *pgxpool.Pool) gin.HandlerFunc {
+func ListAPIKeys(pool *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
 		if !exists {
@@ -103,7 +103,7 @@ func ListAPIKeys(pool *pgxpool.Pool) gin.HandlerFunc {
 //	@Failure		404	{object}	errorResponse
 //	@Failure		500	{object}	errorResponse
 //	@Router			/auth/api-keys/{id} [delete]
-func RevokeAPIKey(pool *pgxpool.Pool, cacheClient *cache.Client) gin.HandlerFunc {
+func RevokeAPIKey(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
 		if !exists {

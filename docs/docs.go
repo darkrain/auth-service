@@ -157,7 +157,7 @@ const docTemplate = `{
         },
         "/auth/login": {
             "post": {
-                "description": "Authenticates a user by login (email or phone) and password. Returns a JWT token on success, or 202 if 2FA is required.",
+                "description": "Authenticates a user by login (email or phone) and password. Returns an opaque session token on success, or 202 if TOTP verification is required.",
                 "consumes": [
                     "application/json"
                 ],
@@ -233,7 +233,7 @@ const docTemplate = `{
         },
         "/auth/login/verify-2fa": {
             "post": {
-                "description": "Completes the login process by verifying a 2FA code. Returns a JWT token on success.",
+                "description": "Completes the password-authenticated login challenge with a TOTP code from an authenticator app.",
                 "consumes": [
                     "application/json"
                 ],
@@ -246,7 +246,7 @@ const docTemplate = `{
                 "summary": "Verify 2FA code during login",
                 "parameters": [
                     {
-                        "description": "Login, 2FA code and device UID",
+                        "description": "Challenge token, authenticator code and device UID",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -360,9 +360,107 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/password/reset-confirm": {
+            "post": {
+                "description": "Verifies the reset code and sets a new password. Invalidates all existing sessions.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "password-reset"
+                ],
+                "summary": "Confirm password reset",
+                "parameters": [
+                    {
+                        "description": "Login, code, device UID and new password",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.resetConfirmBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.messageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/password/reset-request": {
+            "post": {
+                "description": "Sends a one-time password reset code to the user's email or phone. Always returns 200 to avoid user enumeration.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "password-reset"
+                ],
+                "summary": "Request password reset code",
+                "parameters": [
+                    {
+                        "description": "Login and device UID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.resetRequestBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.messageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/register": {
             "post": {
-                "description": "Creates a new user account. Login can be an email address or a phone number. A verification code will be sent to the provided contact.",
+                "description": "Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls.",
                 "consumes": [
                     "application/json"
                 ],
@@ -388,179 +486,11 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/handler.messageResponse"
+                            "$ref": "#/definitions/handler.registerResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/auth/send-code": {
-            "post": {
-                "description": "Sends a verification code to the specified email or phone number.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "verification"
-                ],
-                "summary": "Send verification code",
-                "parameters": [
-                    {
-                        "description": "Recipient and device UID",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handler.sendCodeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handler.messageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    },
-                    "429": {
-                        "description": "Too Many Requests",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/auth/verify/email": {
-            "post": {
-                "description": "Verifies a user's email address using a code sent to them.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "verification"
-                ],
-                "summary": "Verify email address",
-                "parameters": [
-                    {
-                        "description": "Email, code and device UID",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handler.verifyCodeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handler.messageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    },
-                    "429": {
-                        "description": "Too Many Requests",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/auth/verify/phone": {
-            "post": {
-                "description": "Verifies a user's phone number using a code sent to them.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "verification"
-                ],
-                "summary": "Verify phone number",
-                "parameters": [
-                    {
-                        "description": "Phone, code and device UID",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handler.verifyCodeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handler.messageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handler.errorResponse"
-                        }
-                    },
-                    "429": {
-                        "description": "Too Many Requests",
                         "schema": {
                             "$ref": "#/definitions/handler.errorResponse"
                         }
@@ -596,6 +526,10 @@ const docTemplate = `{
         "handler.errorResponse": {
             "type": "object",
             "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "ERR_INVALID_REQUEST"
+                },
                 "error": {
                     "type": "string",
                     "example": "error description"
@@ -605,9 +539,13 @@ const docTemplate = `{
         "handler.login2FAResponse": {
             "type": "object",
             "properties": {
+                "challenge_token": {
+                    "type": "string",
+                    "example": "short-lived-login-challenge"
+                },
                 "message": {
                     "type": "string",
-                    "example": "Code sent to your email/phone. Please verify."
+                    "example": "Enter the code from your authenticator app."
                 },
                 "requires_2fa": {
                     "type": "boolean",
@@ -660,10 +598,6 @@ const docTemplate = `{
                     "type": "string",
                     "example": "+79001234567"
                 },
-                "role": {
-                    "type": "string",
-                    "example": "user"
-                },
                 "verify_status": {
                     "type": "string",
                     "example": "verified"
@@ -682,6 +616,13 @@ const docTemplate = `{
         "handler.registerRequest": {
             "type": "object",
             "properties": {
+                "allow_fallback": {
+                    "type": "boolean"
+                },
+                "device_uid": {
+                    "type": "string",
+                    "example": "device-uuid-1234"
+                },
                 "login": {
                     "type": "string",
                     "example": "user@example.com"
@@ -689,23 +630,43 @@ const docTemplate = `{
                 "password": {
                     "type": "string",
                     "example": "Secret123!"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "telegram"
+                },
+                "role": {
+                    "type": "string",
+                    "example": "model"
                 }
             }
         },
-        "handler.sendCodeRequest": {
+        "handler.registerResponse": {
             "type": "object",
             "properties": {
-                "device_uid": {
-                    "type": "string",
-                    "example": "device-uuid-1234"
+                "expires_in": {
+                    "type": "integer",
+                    "example": 1800
                 },
-                "recipient": {
+                "message": {
                     "type": "string",
-                    "example": "user@example.com"
+                    "example": "Registration successful. Please verify your email/phone."
+                },
+                "registration_token": {
+                    "type": "string",
+                    "example": "a3f2c1...hex64"
+                },
+                "resend_after_sec": {
+                    "type": "integer",
+                    "example": 60
+                },
+                "verification_id": {
+                    "type": "integer",
+                    "example": 42
                 }
             }
         },
-        "handler.verifyCodeRequest": {
+        "handler.resetConfirmBody": {
             "type": "object",
             "properties": {
                 "code": {
@@ -716,7 +677,24 @@ const docTemplate = `{
                     "type": "string",
                     "example": "device-uuid-1234"
                 },
-                "recipient": {
+                "login": {
+                    "type": "string",
+                    "example": "user@example.com"
+                },
+                "new_password": {
+                    "type": "string",
+                    "example": "NewSecret123!"
+                }
+            }
+        },
+        "handler.resetRequestBody": {
+            "type": "object",
+            "properties": {
+                "device_uid": {
+                    "type": "string",
+                    "example": "device-uuid-1234"
+                },
+                "login": {
                     "type": "string",
                     "example": "user@example.com"
                 }
@@ -725,6 +703,10 @@ const docTemplate = `{
         "handler.verifyLogin2FARequest": {
             "type": "object",
             "properties": {
+                "challenge_token": {
+                    "type": "string",
+                    "example": "short-lived-login-challenge"
+                },
                 "code": {
                     "type": "string",
                     "example": "123456"
@@ -732,17 +714,13 @@ const docTemplate = `{
                 "device_uid": {
                     "type": "string",
                     "example": "device-uuid-1234"
-                },
-                "login": {
-                    "type": "string",
-                    "example": "user@example.com"
                 }
             }
         }
     },
     "securityDefinitions": {
         "BearerAuth": {
-            "description": "Type \"Bearer\" followed by a space and the JWT token.",
+            "description": "Type \"Bearer\" followed by a space and the session token.",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"
@@ -757,7 +735,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "Auth Service API",
-	Description:      "Authentication and authorization microservice with JWT sessions, 2FA, and API key management.",
+	Description:      "Authentication and authorization microservice with opaque sessions, 2FA, and API key management.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
