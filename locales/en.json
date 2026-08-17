@@ -16,6 +16,7 @@
     "label": "Contact verification",
     "actions": { "list": "Contact verifications", "view": "View verification", "add": "Send code", "update": "Confirm code", "defrec": "New contact verification" },
     "fields": { "id": "ID", "user_id": "User", "contact_type": "Contact type", "recipient": "Email or phone", "device_uid": "Device ID", "provider": "Delivery provider", "allow_fallback": "Allow fallback", "purpose": "Purpose", "status": "Status", "code": "Verification code", "counter": "Attempts", "sent_at": "Sent", "creation_date": "Created", "expires_at": "Expires" },
-    "options": { "email": "Email", "phone": "Phone" }
+    "options": { "email": "Email", "phone": "Phone" },
+    "errors": { "resend_cooldown": "A verification code was sent recently. Try again in %d seconds." }
   }
 }

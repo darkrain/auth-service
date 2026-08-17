@@ -32,8 +32,9 @@ type RateLimitAccount struct {
 }
 
 type RateLimitCode struct {
-	MaxAttempts int `json:"MaxAttempts"`
-	TTLSec      int `json:"TTLSec"`
+	MaxAttempts       int `json:"MaxAttempts"`
+	TTLSec            int `json:"TTLSec"`
+	ResendCooldownSec int `json:"ResendCooldownSec"`
 }
 
 type RateLimit struct {
@@ -137,6 +138,9 @@ func Load(path string) (*Config, error) {
 	// Default PasswordResetRateLimitPerHour
 	if cfg.PasswordResetRateLimitPerHour == 0 {
 		cfg.PasswordResetRateLimitPerHour = 3
+	}
+	if cfg.RateLimit.Code.ResendCooldownSec == 0 {
+		cfg.RateLimit.Code.ResendCooldownSec = 60
 	}
 	cfg.setMessageDefaults()
 

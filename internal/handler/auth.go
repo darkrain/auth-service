@@ -47,6 +47,7 @@ type registerResponse struct {
 	RegistrationToken string `json:"registration_token" example:"a3f2c1...hex64"`
 	ExpiresIn         int    `json:"expires_in" example:"1800"`
 	VerificationID    int64  `json:"verification_id" example:"42"`
+	ResendAfterSec    int    `json:"resend_after_sec" example:"60"`
 }
 
 type errorResponse struct {
@@ -271,6 +272,7 @@ func Register(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) gin.Handl
 			"registration_token": result.RegistrationToken,
 			"expires_in":         result.ExpiresIn,
 			"verification_id":    result.VerificationID,
+			"resend_after_sec":   result.ResendAfterSec,
 		})
 	}
 }

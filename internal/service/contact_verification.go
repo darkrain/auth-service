@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"strings"
 	"time"
@@ -15,6 +17,26 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// ResendCooldownError tells a caller when a contact verification may be sent
+// again. It wraps ErrTooManyRequests so existing error handling stays intact.
+type ResendCooldownError struct {
+	RetryAfterSec int
+}
+
+func (e *ResendCooldownError) Error() string {
+	return fmt.Sprintf("%s: retry after %d seconds", ErrTooManyRequests, e.RetryAfterSec)
+}
+
+func (e *ResendCooldownError) Unwrap() error { return ErrTooManyRequests }
+
+func ResendRetryAfter(err error) int {
+	var cooldown *ResendCooldownError
+	if errors.As(err, &cooldown) {
+		return cooldown.RetryAfterSec
+	}
+	return 0
+}
 
 // ContactVerificationRequest describes a code delivery request. It is shared
 // by registration and the generator-backed account settings flow.
@@ -88,6 +110,11 @@ func PrepareContactVerification(ctx context.Context, pool *sql.DB, cfg *config.C
 			return nil, fmt.Errorf("%w: contact is already in use", ErrAlreadyExists)
 		}
 	}
+	if retryAfter, err := contactVerificationRetryAfter(ctx, pool, cfg, request); err != nil {
+		return nil, err
+	} else if retryAfter > 0 {
+		return nil, &ResendCooldownError{RetryAfterSec: retryAfter}
+	}
 
 	code := testVerificationCode(cfg, request.Recipient)
 	if code == "" {
@@ -114,6 +141,30 @@ func PrepareContactVerification(ctx context.Context, pool *sql.DB, cfg *config.C
 		SentAt:                     now,
 		ExpiresAt:                  now.Add(time.Duration(ttl) * time.Second),
 	}, nil
+}
+
+func contactVerificationRetryAfter(ctx context.Context, pool *sql.DB, cfg *config.Config, request ContactVerificationRequest) (int, error) {
+	if pool == nil || cfg.RateLimit.Code.ResendCooldownSec <= 0 {
+		return 0, nil
+	}
+	var sentAt time.Time
+	err := pool.QueryRowContext(ctx, `
+		SELECT sent_ts
+		FROM contact_verifications
+		WHERE user_id=$1 AND contact_type=$2 AND recipient=$3 AND status='pending'
+		ORDER BY sent_ts DESC
+		LIMIT 1`, request.UserID, request.ContactType, request.Recipient).Scan(&sentAt)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load verification cooldown: %w", err)
+	}
+	remaining := time.Until(sentAt.Add(time.Duration(cfg.RateLimit.Code.ResendCooldownSec) * time.Second))
+	if remaining <= 0 {
+		return 0, nil
+	}
+	return int(math.Ceil(remaining.Seconds())), nil
 }
 
 func PublishContactVerification(ctx context.Context, conn *amqp.Connection, cfg *config.Config, verification *PreparedContactVerification) error {

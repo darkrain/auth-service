@@ -80,6 +80,19 @@ func TestRegistrationTokenCanResendOnlyOriginalContact(t *testing.T) {
 	registrationToken, _ := registered["registration_token"].(string)
 	initialID, _ := registered["verification_id"].(float64)
 
+	immediateResend := doRequest("PUT", "/auth/contact_verifications", map[string]interface{}{
+		"contact_type": "email", "recipient": "resend-registration@example.com", "device_uid": "resend-device", "allow_fallback": true,
+	}, registrationToken)
+	if immediateResend.Code != http.StatusTooManyRequests {
+		t.Fatalf("immediate resend: expected 429, got %d: %s", immediateResend.Code, immediateResend.Body.String())
+	}
+	if immediateResend.Header().Get("Retry-After") == "" {
+		t.Fatalf("immediate resend must expose Retry-After: %s", immediateResend.Header())
+	}
+	if _, err := testPool.ExecContext(context.Background(), `UPDATE contact_verifications SET sent_ts=NOW() - INTERVAL '61 seconds' WHERE id=$1`, int64(initialID)); err != nil {
+		t.Fatal(err)
+	}
+
 	resend := doRequest("PUT", "/auth/contact_verifications", map[string]interface{}{
 		"contact_type": "email", "recipient": "resend-registration@example.com", "device_uid": "resend-device", "allow_fallback": true,
 	}, registrationToken)

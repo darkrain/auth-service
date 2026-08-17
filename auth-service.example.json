@@ -65,7 +65,8 @@
     },
     "Code": {
       "MaxAttempts": 5,
-      "TTLSec": 300
+      "TTLSec": 300,
+      "ResendCooldownSec": 60
     }
   }
 }

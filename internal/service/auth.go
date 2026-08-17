@@ -316,6 +316,7 @@ type RegisterResult struct {
 	RegistrationToken string
 	ExpiresIn         int
 	VerificationID    int64
+	ResendAfterSec    int
 }
 
 // Register validates, hashes password, inserts user and publishes a verification event.
@@ -454,6 +455,7 @@ func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 		RegistrationToken: registrationToken,
 		ExpiresIn:         expiresIn,
 		VerificationID:    verificationID,
+		ResendAfterSec:    cfg.RateLimit.Code.ResendCooldownSec,
 	}, nil
 }
 

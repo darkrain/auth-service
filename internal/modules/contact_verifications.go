@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/delivery"
+	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/service"
 	module "github.com/darkrain/request-generator"
 	"github.com/darkrain/request-generator/actions"
@@ -127,6 +129,11 @@ func requestContactVerification(pool *sql.DB, conn *amqp.Connection, cfg *config
 		}
 		prepared, err := service.PrepareContactVerification(c.Request.Context(), pool, cfg, request)
 		if err != nil {
+			if retryAfter := service.ResendRetryAfter(err); retryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+				message := fmt.Sprintf(module.Translate(c, "contact_verifications.errors.resend_cooldown", "A verification code was sent recently. Try again in %d seconds."), retryAfter)
+				c.JSON(http.StatusTooManyRequests, gin.H{"error": message, "code": handler.CodeVerificationCooldown, "retry_after": retryAfter})
+			}
 			return err
 		}
 		if err = service.PublishContactVerification(c.Request.Context(), conn, cfg, prepared); err != nil {
