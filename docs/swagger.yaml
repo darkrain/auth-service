@@ -23,8 +23,11 @@ definitions:
     type: object
   handler.login2FAResponse:
     properties:
+      challenge_token:
+        example: short-lived-login-challenge
+        type: string
       message:
-        example: Code sent to your email/phone. Please verify.
+        example: Enter the code from your authenticator app.
         type: string
       requires_2fa:
         example: true
@@ -103,6 +106,9 @@ definitions:
       registration_token:
         example: a3f2c1...hex64
         type: string
+      resend_after_sec:
+        example: 60
+        type: integer
       verification_id:
         example: 42
         type: integer
@@ -133,14 +139,14 @@ definitions:
     type: object
   handler.verifyLogin2FARequest:
     properties:
+      challenge_token:
+        example: short-lived-login-challenge
+        type: string
       code:
         example: "123456"
         type: string
       device_uid:
         example: device-uuid-1234
-        type: string
-      login:
-        example: user@example.com
         type: string
     type: object
 host: localhost:8080
@@ -148,8 +154,8 @@ info:
   contact:
     name: darkrain
     url: https://github.com/darkrain/auth-service
-  description: Authentication and authorization microservice with JWT sessions, 2FA,
-    and API key management.
+  description: Authentication and authorization microservice with opaque sessions,
+    2FA, and API key management.
   license:
     name: MIT
   termsOfService: http://swagger.io/terms/
@@ -248,7 +254,7 @@ paths:
       consumes:
       - application/json
       description: Authenticates a user by login (email or phone) and password. Returns
-        a JWT token on success, or 202 if 2FA is required.
+        an opaque session token on success, or 202 if TOTP verification is required.
       parameters:
       - description: Login credentials
         in: body
@@ -298,10 +304,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Completes the login process by verifying a code sent after a successful
-        password check.
+      description: Completes the password-authenticated login challenge with a TOTP
+        code from an authenticator app.
       parameters:
-      - description: Login, code and device UID
+      - description: Challenge token, authenticator code and device UID
         in: body
         name: request
         required: true
@@ -479,7 +485,7 @@ paths:
       - auth
 securityDefinitions:
   BearerAuth:
-    description: Type "Bearer" followed by a space and the JWT token.
+    description: Type "Bearer" followed by a space and the session token.
     in: header
     name: Authorization
     type: apiKey

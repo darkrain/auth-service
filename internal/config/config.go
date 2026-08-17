@@ -103,6 +103,8 @@ type Config struct {
 	SessionTTLDays                int                 `json:"SessionTTLDays"`
 	RegistrationTokenTTLMin       int                 `json:"RegistrationTokenTTLMin"`
 	TwoFactorEnabled              bool                `json:"TwoFactorEnabled"`
+	TwoFactorIssuer               string              `json:"TwoFactorIssuer"`
+	TwoFactorEncryptionKey        string              `json:"TwoFactorEncryptionKey"`
 	PasswordResetCodeTTLMin       int                 `json:"PasswordResetCodeTTLMin"`
 	PasswordResetRateLimitPerHour int                 `json:"PasswordResetRateLimitPerHour"`
 	TrustedProxies                []string            `json:"TrustedProxies"`
@@ -141,6 +143,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.RateLimit.Code.ResendCooldownSec == 0 {
 		cfg.RateLimit.Code.ResendCooldownSec = 60
+	}
+	if cfg.TwoFactorIssuer == "" {
+		cfg.TwoFactorIssuer = "Auth Service"
 	}
 	cfg.setMessageDefaults()
 
@@ -217,6 +222,9 @@ func (c *Config) Validate() error {
 	}
 	if c.PasswordResetRateLimitPerHour <= 0 {
 		return errors.New("config: PasswordResetRateLimitPerHour must be greater than 0")
+	}
+	if c.TwoFactorEnabled && c.TwoFactorEncryptionKey == "" {
+		return errors.New("config: TwoFactorEncryptionKey must not be empty when TwoFactorEnabled is enabled")
 	}
 	if c.MessageBroker.Host == "" || c.MessageBroker.ExchangeName == "" || c.MessageBroker.ExchangeKind == "" || c.MessageBroker.RoutingKeys.DeliveryRequested == "" {
 		return errors.New("config: MessageBroker configuration is incomplete")

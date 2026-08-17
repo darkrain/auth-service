@@ -1,17 +1,18 @@
 # auth-service
 
-A lightweight authentication and authorization microservice built with Go and Gin. Supports JWT session tokens, email/phone 2FA, API key management, rate limiting, and RabbitMQ-based notification delivery.
+A lightweight authentication and authorization microservice built with Go and Gin. Supports opaque session tokens, email/phone verification, TOTP two-factor authentication, API key management, rate limiting, and RabbitMQ-based notification delivery.
 
 ## Features
 
 - Registration and login via email or phone
-- Two-factor authentication (2FA) with verification codes
-- JWT session tokens with configurable TTL
+- TOTP two-factor authentication with authenticator applications
+- Opaque session tokens with configurable TTL
 - API key management (admin/system roles)
 - Redis-backed rate limiting and session cache
 - PostgreSQL for persistent storage with auto-migrations
 - Versioned `message.delivery.requested` events for the separate message-delivery service
 - API-driven contact verification and account-security modules powered by request-generator
+- Password change, active-session revocation, and account deactivation controls
 - Swagger/OpenAPI documentation
 
 ## API Endpoints
@@ -26,6 +27,11 @@ A lightweight authentication and authorization microservice built with Go and Gi
 | POST | `/auth/contact_verifications/id/{id}` | Bearer | Confirm a contact-verification code |
 | GET | `/auth/account_security/view/id/{current_user_id}` | Bearer | API-driven Account & Security settings projection |
 | POST | `/auth/login/verify-2fa` | — | Complete 2FA login |
+| POST | `/auth/account_password/id/{current_user_id}` | Bearer | Change password and revoke other sessions |
+| POST | `/auth/account_two_factor/id/{current_user_id}` | Bearer | Enable or disable TOTP two-factor authentication |
+| GET | `/auth/account_sessions` | Bearer | List active sessions without exposing tokens |
+| DELETE | `/auth/account_sessions/delete/id/{session_id}` | Bearer | Revoke one active session |
+| POST | `/auth/account_deactivation/id/{current_user_id}` | Bearer | Deactivate the account and revoke all sessions |
 | GET | `/auth/me` | Bearer | Get current user info |
 | POST | `/auth/api-keys` | Bearer + admin/system | Create API key |
 | GET | `/auth/api-keys` | Bearer + admin/system | List API keys |
@@ -55,6 +61,25 @@ cp auth-service.example.json auth-service.json
 `CodeDelivery` defines the permitted providers and default delivery chain:
 email uses its default provider; a phone falls through `telegram`, `whatsapp`,
 then `sms` unless the caller explicitly selects a permitted provider.
+
+To enable TOTP two-factor authentication, set `TwoFactorEnabled` and supply a
+stable base64-encoded 32-byte encryption key. The key encrypts TOTP secrets at
+rest and must be backed up with the database: changing it makes existing 2FA
+secrets unreadable.
+
+```json
+{
+  "TwoFactorEnabled": true,
+  "TwoFactorIssuer": "Example Application",
+  "TwoFactorEncryptionKey": "<base64-encoded-32-byte-key>"
+}
+```
+
+Generate a new key only for a new environment:
+
+```bash
+openssl rand -base64 32
+```
 
 The service does not deliver email, Telegram, WhatsApp, or SMS itself. It only
 creates and validates the code, then publishes this stable payload to RabbitMQ:
@@ -130,6 +155,79 @@ PostgreSQL; the plaintext code exists only while the delivery event is being
 published. `CodeDelivery` validates a user-selected provider and its fallback
 chain before the request is created.
 
+## Account Security
+
+`GET /auth/account_security/view/id/{current_user_id}` returns the localized
+settings projection and the action metadata. A client renders it with its
+existing component kit; the service does not prescribe HTML or CSS. The
+projection includes existing contacts, password information, TOTP state, and
+the available sessions/deactivation actions.
+
+### Password and sessions
+
+Change a password through the generator-backed action. The current password is
+always required; accounts with TOTP enabled also require a current TOTP code.
+Every session except the caller's is revoked after a successful change.
+
+```json
+POST /auth/account_password/id/42
+Authorization: Bearer <session-token>
+
+{
+  "current_password": "CurrentPassword1",
+  "new_password": "NewPassword2",
+  "confirmation": "NewPassword2",
+  "two_factor_code": "123456"
+}
+```
+
+`GET /auth/account_sessions` returns device ID, IP address, sign-in method,
+last activity, and expiry. It never returns a token. A user may revoke an
+individual non-current session with `DELETE
+/auth/account_sessions/delete/id/{session_id}`.
+
+### TOTP two-factor authentication
+
+The client generates a random base32 secret with browser cryptography, shows
+the user its standard `otpauth://` QR code, and submits the secret and first
+six-digit code to the standard update action. The first code proves the secret
+was scanned before it is encrypted and stored.
+
+```json
+POST /auth/account_two_factor/id/42
+Authorization: Bearer <session-token>
+
+{
+  "two_factor_enabled": true,
+  "two_factor_secret": "BASE32SECRET",
+  "two_factor_code": "123456"
+}
+```
+
+On sign-in, a valid password for an account with enabled TOTP returns `202`
+with a single-use, five-minute `challenge_token`. It is bound to the requesting
+device and IP address. The client must then submit the authenticator code:
+
+```json
+POST /auth/login/verify-2fa
+
+{
+  "challenge_token": "<challenge-token>",
+  "device_uid": "web-device-123",
+  "code": "123456"
+}
+```
+
+A code by itself cannot create a session. Failed challenge attempts are rate
+limited by `RateLimit.Code.MaxAttempts`.
+
+### Deactivation
+
+Account deactivation requires the current password, `DEACTIVATE` confirmation,
+and a TOTP code when enabled. It marks the account as `deactivated`, blocks all
+sessions immediately, and prevents subsequent sign-in. Restoring access is an
+explicit support operation; there is no self-service reactivation endpoint.
+
 ### Run locally
 
 ```bash
@@ -153,6 +251,10 @@ Start test dependencies (PostgreSQL + Redis):
 ```bash
 docker compose -f docker-compose.test.yml up -d
 ```
+
+The test compose file intentionally exposes its Redis instance on `6381` so
+it cannot flush or reuse a local development/staging Redis on the usual
+`6380` port. `auth-service.test.json` already uses that isolated port.
 
 Run integration tests:
 

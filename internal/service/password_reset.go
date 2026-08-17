@@ -217,7 +217,7 @@ func ConfirmPasswordReset(
 
 	// Update password
 	_, err = pool.ExecContext(ctx,
-		`UPDATE users SET password=$1, update_date=NOW() WHERE id=$2`,
+		`UPDATE users SET password=$1, password_updated_at=NOW(), update_date=NOW() WHERE id=$2`,
 		string(hash), userID,
 	)
 	if err != nil {

@@ -25,8 +25,9 @@ type loginResponse struct {
 }
 
 type login2FAResponse struct {
-	Message     string `json:"message" example:"Code sent to your email/phone. Please verify."`
-	Requires2FA bool   `json:"requires_2fa" example:"true"`
+	Message        string `json:"message" example:"Enter the code from your authenticator app."`
+	Requires2FA    bool   `json:"requires_2fa" example:"true"`
+	ChallengeToken string `json:"challenge_token" example:"short-lived-login-challenge"`
 }
 
 type registerRequest struct {
@@ -58,7 +59,7 @@ type errorResponse struct {
 // Login handles POST /auth/login
 //
 //	@Summary		Login with email/phone and password
-//	@Description	Authenticates a user by login (email or phone) and password. Returns a JWT token on success, or 202 if 2FA is required.
+//	@Description	Authenticates a user by login (email or phone) and password. Returns an opaque session token on success, or 202 if TOTP verification is required.
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
@@ -72,7 +73,7 @@ type errorResponse struct {
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/login [post]
-func Login(pool *sql.DB, conn *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
+func Login(pool *sql.DB, _ *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req loginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -86,17 +87,9 @@ func Login(pool *sql.DB, conn *amqp.Connection, cfg *config.Config, cacheClient 
 			ip = c.Request.RemoteAddr
 		}
 
-		result, err := service.Login(c.Request.Context(), pool, cfg, cacheClient, req.Login, req.Password, ip)
+		result, err := service.Login(c.Request.Context(), pool, cfg, cacheClient, req.Login, req.Password, req.DeviceUID, ip)
 		if err != nil {
 			switch {
-			case errors.Is(err, service.Err2FA):
-				// Send code and return 202 (userID=0 — not yet authenticated, skip ownership check)
-				_ = service.SendCode(c.Request.Context(), pool, conn, cfg, req.Login, req.DeviceUID, "", true, 0)
-				c.JSON(http.StatusAccepted, gin.H{
-					"message":      "Code sent to your email/phone. Please verify.",
-					"requires_2fa": true,
-					"code":         Code2FARequired,
-				})
 			case errors.Is(err, service.ErrAccountLocked):
 				c.JSON(http.StatusTooManyRequests, errResp(CodeAccountLocked, "Account temporarily locked due to too many failed attempts"))
 			case errors.Is(err, service.ErrValidation):
@@ -122,6 +115,15 @@ func Login(pool *sql.DB, conn *amqp.Connection, cfg *config.Config, cacheClient 
 			default:
 				c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))
 			}
+			return
+		}
+		if result.Requires2FA {
+			c.JSON(http.StatusAccepted, gin.H{
+				"message":         "Enter the code from your authenticator app.",
+				"requires_2fa":    true,
+				"challenge_token": result.ChallengeToken,
+				"code":            Code2FARequired,
+			})
 			return
 		}
 
@@ -187,6 +189,7 @@ type meResponse struct {
 func Me() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
+		sessionID, _ := c.Get("session_id")
 		email, _ := c.Get("email")
 		phone, _ := c.Get("phone")
 		role, _ := c.Get("role")
@@ -194,6 +197,7 @@ func Me() gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"id":            userID,
+			"session_id":    sessionID,
 			"email":         email,
 			"phone":         phone,
 			"role":          role,

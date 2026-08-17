@@ -157,7 +157,7 @@ const docTemplate = `{
         },
         "/auth/login": {
             "post": {
-                "description": "Authenticates a user by login (email or phone) and password. Returns a JWT token on success, or 202 if 2FA is required.",
+                "description": "Authenticates a user by login (email or phone) and password. Returns an opaque session token on success, or 202 if TOTP verification is required.",
                 "consumes": [
                     "application/json"
                 ],
@@ -233,7 +233,7 @@ const docTemplate = `{
         },
         "/auth/login/verify-2fa": {
             "post": {
-                "description": "Completes the login process by verifying a code sent after a successful password check.",
+                "description": "Completes the password-authenticated login challenge with a TOTP code from an authenticator app.",
                 "consumes": [
                     "application/json"
                 ],
@@ -246,7 +246,7 @@ const docTemplate = `{
                 "summary": "Verify 2FA code during login",
                 "parameters": [
                     {
-                        "description": "Login, code and device UID",
+                        "description": "Challenge token, authenticator code and device UID",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -539,9 +539,13 @@ const docTemplate = `{
         "handler.login2FAResponse": {
             "type": "object",
             "properties": {
+                "challenge_token": {
+                    "type": "string",
+                    "example": "short-lived-login-challenge"
+                },
                 "message": {
                     "type": "string",
-                    "example": "Code sent to your email/phone. Please verify."
+                    "example": "Enter the code from your authenticator app."
                 },
                 "requires_2fa": {
                     "type": "boolean",
@@ -652,6 +656,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "a3f2c1...hex64"
                 },
+                "resend_after_sec": {
+                    "type": "integer",
+                    "example": 60
+                },
                 "verification_id": {
                     "type": "integer",
                     "example": 42
@@ -695,6 +703,10 @@ const docTemplate = `{
         "handler.verifyLogin2FARequest": {
             "type": "object",
             "properties": {
+                "challenge_token": {
+                    "type": "string",
+                    "example": "short-lived-login-challenge"
+                },
                 "code": {
                     "type": "string",
                     "example": "123456"
@@ -702,17 +714,13 @@ const docTemplate = `{
                 "device_uid": {
                     "type": "string",
                     "example": "device-uuid-1234"
-                },
-                "login": {
-                    "type": "string",
-                    "example": "user@example.com"
                 }
             }
         }
     },
     "securityDefinitions": {
         "BearerAuth": {
-            "description": "Type \"Bearer\" followed by a space and the JWT token.",
+            "description": "Type \"Bearer\" followed by a space and the session token.",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"
@@ -727,7 +735,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "Auth Service API",
-	Description:      "Authentication and authorization microservice with JWT sessions, 2FA, and API key management.",
+	Description:      "Authentication and authorization microservice with opaque sessions, 2FA, and API key management.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

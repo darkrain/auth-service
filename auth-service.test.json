@@ -4,6 +4,9 @@
   "PasswordSalt": "test_salt",
   "PasswordMinLength": 6,
   "PasswordRequireDigits": true,
+  "TwoFactorEnabled": true,
+  "TwoFactorIssuer": "Auth Service Test",
+  "TwoFactorEncryptionKey": "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=",
   "SystemUserEmail": "system@test.internal",
   "SystemUserPassword": "System123",
   "PostgreSqlHost": "localhost",
@@ -13,7 +16,7 @@
   "PostgreSqlDatabase": "auth_test",
   "RedisDatabaseNetwork": "tcp",
   "RedisDatabaseHost": "localhost",
-  "RedisDatabasePort": "6380",
+  "RedisDatabasePort": "6381",
   "MessageBroker": { "PublishMode": "disabled" },
   "CodeDelivery": {
     "Email": { "DefaultProvider": "email", "AllowedProviders": ["email"] },

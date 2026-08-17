@@ -3,12 +3,34 @@
     "label": "Аккаунт и безопасность",
     "subtitle": "Управляйте подтверждёнными контактами для входа и восстановления доступа.",
     "actions": { "view": "Аккаунт и безопасность" },
-    "fields": { "id": "ID", "email": "Email", "email_verified": "Email подтверждён", "phone": "Телефон", "phone_verified": "Телефон подтверждён", "role": "Роль", "verify_status": "Статус аккаунта" },
+    "fields": { "id": "ID", "email": "Email", "email_verified": "Email подтверждён", "phone": "Телефон", "phone_verified": "Телефон подтверждён", "role": "Роль", "verify_status": "Статус аккаунта", "two_factor_enabled": "Двухфакторная аутентификация", "password_updated_at": "Пароль изменён" },
     "contacts": {
       "title": "Контакты для входа",
       "subtitle": "Добавьте второй способ входа. Новый контакт станет доступен только после подтверждения кода.",
-      "email": { "title": "Email", "text": "Добавить или заменить email", "action": "Управлять email" },
-      "phone": { "title": "Телефон", "text": "Добавить или заменить телефон", "action": "Управлять телефоном" }
+      "email": { "title": "Email", "text": "Добавить или заменить email", "action": "Изменить" },
+      "phone": { "title": "Телефон", "text": "Добавить или заменить телефон", "action": "Изменить" }
+    },
+    "password": {
+      "label": "Пароль",
+      "action": "Изменить",
+      "new_password": "Новый пароль"
+    },
+    "two_factor": {
+      "label": "Двухфакторная аутентификация",
+      "action": "Настроить",
+      "secret": "Секрет 2FA",
+      "confirmed_at": "2FA подтверждена"
+    },
+    "sessions": {
+      "label": "Активные сессии",
+      "action": "Открыть",
+      "fields": { "id": "ID", "auth_type": "Способ входа", "device_uid": "Устройство", "ip": "IP-адрес", "creation_date": "Вход выполнен", "last_seen_at": "Последняя активность", "expire_date": "Истекает", "blocked": "Завершена" },
+      "actions": { "list": "Активные сессии", "delete": "Завершить сессию" }
+    },
+    "deactivate": {
+      "label": "Деактивация аккаунта",
+      "action": "Отключить",
+      "deactivated_at": "Деактивирован"
     },
     "status": { "verified": "Подтверждён", "not_verified": "Не подтверждён" }
   },

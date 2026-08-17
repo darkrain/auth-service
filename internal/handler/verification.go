@@ -6,32 +6,33 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
 type verifyLogin2FARequest struct {
-	Login     string `json:"login" example:"user@example.com"`
-	Code      string `json:"code" example:"123456"`
-	DeviceUID string `json:"device_uid" example:"device-uuid-1234"`
+	ChallengeToken string `json:"challenge_token" example:"short-lived-login-challenge"`
+	Code           string `json:"code" example:"123456"`
+	DeviceUID      string `json:"device_uid" example:"device-uuid-1234"`
 }
 
 // VerifyLogin2FA handles POST /auth/login/verify-2fa.
 //
 //	@Summary		Verify 2FA code during login
-//	@Description	Completes the login process by verifying a code sent after a successful password check.
+//	@Description	Completes the password-authenticated login challenge with a TOTP code from an authenticator app.
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
-//	@Param			request	body		verifyLogin2FARequest	true	"Login, code and device UID"
+//	@Param			request	body		verifyLogin2FARequest	true	"Challenge token, authenticator code and device UID"
 //	@Success		200		{object}	loginResponse
 //	@Failure		400		{object}	errorResponse
 //	@Failure		404		{object}	errorResponse
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/login/verify-2fa [post]
-func VerifyLogin2FA(pool *sql.DB, cfg *config.Config) gin.HandlerFunc {
+func VerifyLogin2FA(pool *sql.DB, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req verifyLogin2FARequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,8 +45,8 @@ func VerifyLogin2FA(pool *sql.DB, cfg *config.Config) gin.HandlerFunc {
 			ip = c.Request.RemoteAddr
 		}
 
-		result, err := service.LoginVerify2FA(c.Request.Context(), pool, cfg, service.Login2FARequest{
-			Login: req.Login, Code: req.Code, DeviceUID: req.DeviceUID, IP: ip,
+		result, err := service.LoginVerify2FA(c.Request.Context(), pool, cfg, cacheClient, service.Login2FARequest{
+			ChallengeToken: req.ChallengeToken, Code: req.Code, DeviceUID: req.DeviceUID, IP: ip,
 		})
 		if err != nil {
 			handleVerifyError(c, err)

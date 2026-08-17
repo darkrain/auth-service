@@ -3,12 +3,34 @@
     "label": "Account & Security",
     "subtitle": "Manage verified contacts used for sign-in and account recovery.",
     "actions": { "view": "Account & Security" },
-    "fields": { "id": "ID", "email": "Email", "email_verified": "Email verified", "phone": "Phone", "phone_verified": "Phone verified", "role": "Role", "verify_status": "Account status" },
+    "fields": { "id": "ID", "email": "Email", "email_verified": "Email verified", "phone": "Phone", "phone_verified": "Phone verified", "role": "Role", "verify_status": "Account status", "two_factor_enabled": "Two-factor authentication", "password_updated_at": "Password updated" },
     "contacts": {
       "title": "Sign-in contacts",
       "subtitle": "Add a second sign-in method. A new contact becomes available only after code verification.",
-      "email": { "title": "Email", "text": "Add or replace email", "action": "Manage email" },
-      "phone": { "title": "Phone", "text": "Add or replace phone", "action": "Manage phone" }
+      "email": { "title": "Email", "text": "Add or replace email", "action": "Change" },
+      "phone": { "title": "Phone", "text": "Add or replace phone", "action": "Change" }
+    },
+    "password": {
+      "label": "Password",
+      "action": "Change",
+      "new_password": "New password"
+    },
+    "two_factor": {
+      "label": "Two-factor authentication",
+      "action": "Configure",
+      "secret": "2FA secret",
+      "confirmed_at": "2FA confirmed"
+    },
+    "sessions": {
+      "label": "Active sessions",
+      "action": "Open",
+      "fields": { "id": "ID", "auth_type": "Sign-in method", "device_uid": "Device", "ip": "IP address", "creation_date": "Signed in", "last_seen_at": "Last activity", "expire_date": "Expires", "blocked": "Revoked" },
+      "actions": { "list": "Active sessions", "delete": "Revoke session" }
+    },
+    "deactivate": {
+      "label": "Account deactivation",
+      "action": "Disable",
+      "deactivated_at": "Deactivated"
     },
     "status": { "verified": "Verified", "not_verified": "Not verified" }
   },

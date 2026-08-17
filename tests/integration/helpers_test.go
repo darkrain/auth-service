@@ -96,7 +96,7 @@ func TestMain(m *testing.M) {
 			cfg.RateLimit.Device.LoginMaxAttempts, cfg.RateLimit.Device.LoginWindowSec),
 		handler.Login(pool, nil, cfg, testCache))
 	r.POST("/auth/logout", handler.Logout(pool, testCache))
-	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pool, cfg))
+	r.POST("/auth/login/verify-2fa", handler.VerifyLogin2FA(pool, cfg, testCache))
 
 	// Password reset (public — no auth required)
 	r.POST("/auth/password/reset-request", handler.ResetRequest(pool, nil, cfg, testCache))
@@ -110,7 +110,14 @@ func TestMain(m *testing.M) {
 	generator := rg.NewGenerator(
 		func(*rg.BaseModule) rgdb.DBExecutor { return moduleDB },
 		*r.Group("/"),
-		[]*rg.BaseModule{authmodules.ContactVerificationsModule(pool, nil, testCache, cfg), authmodules.AccountSecurityModule(pool, cfg)},
+		[]*rg.BaseModule{
+			authmodules.ContactVerificationsModule(pool, nil, testCache, cfg),
+			authmodules.AccountSecurityModule(pool, cfg),
+			authmodules.AccountPasswordModule(pool, testCache, cfg),
+			authmodules.AccountTwoFactorModule(pool, testCache, cfg),
+			authmodules.AccountSessionsModule(pool, testCache, cfg),
+			authmodules.AccountDeactivationModule(pool, testCache, cfg),
+		},
 		func(_ actions.ModuleAction, roles []actions.Role) gin.HandlerFunc {
 			allowed := make([]string, 0, len(roles))
 			for _, role := range roles {
@@ -257,7 +264,7 @@ func createTempSession(t *testing.T, recipient string) string {
 	token := fmt.Sprintf("test-temp-session-%d", userID)
 	_, err := testPool.ExecContext(ctx,
 		`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked)
-		 VALUES ($1, $2, NOW() + INTERVAL '30 days', 'password', '127.0.0.1', false)
+		 VALUES ($1, $2, NOW() + INTERVAL '30 days', 'registration', '127.0.0.1', false)
 		 ON CONFLICT DO NOTHING`,
 		userID, token,
 	)

@@ -2,7 +2,7 @@
 //
 //	@title			Auth Service API
 //	@version		1.0
-//	@description	Authentication and authorization microservice with JWT sessions, 2FA, and API key management.
+//	@description	Authentication and authorization microservice with opaque sessions, 2FA, and API key management.
 //	@termsOfService	http://swagger.io/terms/
 //
 //	@contact.name	darkrain
@@ -16,7 +16,7 @@
 //	@securityDefinitions.apikey	BearerAuth
 //	@in							header
 //	@name						Authorization
-//	@description				Type "Bearer" followed by a space and the JWT token.
+//	@description				Type "Bearer" followed by a space and the session token.
 package main
 
 import (
@@ -186,7 +186,7 @@ func main() {
 		middleware.RateLimit(cacheClient, rmqConn, "/auth/login/verify-2fa",
 			cfg.RateLimit.IP.LoginMaxAttempts, cfg.RateLimit.IP.LoginWindowSec,
 			cfg.RateLimit.Device.SendCodeMaxAttempts, cfg.RateLimit.Device.SendCodeWindowSec),
-		handler.VerifyLogin2FA(pgPool, cfg))
+		handler.VerifyLogin2FA(pgPool, cfg, cacheClient))
 
 	// Password reset (public — no auth required)
 	r.POST("/auth/password/reset-request",
@@ -216,7 +216,14 @@ func main() {
 		generator := rg.NewGenerator(
 			func(*rg.BaseModule) rgdb.DBExecutor { return moduleDB },
 			*r.Group("/"),
-			[]*rg.BaseModule{authmodules.ContactVerificationsModule(pgPool, rmqConn, cacheClient, cfg), authmodules.AccountSecurityModule(pgPool, cfg)},
+			[]*rg.BaseModule{
+				authmodules.ContactVerificationsModule(pgPool, rmqConn, cacheClient, cfg),
+				authmodules.AccountSecurityModule(pgPool, cfg),
+				authmodules.AccountPasswordModule(pgPool, cacheClient, cfg),
+				authmodules.AccountTwoFactorModule(pgPool, cacheClient, cfg),
+				authmodules.AccountSessionsModule(pgPool, cacheClient, cfg),
+				authmodules.AccountDeactivationModule(pgPool, cacheClient, cfg),
+			},
 			func(_ actions.ModuleAction, roles []actions.Role) gin.HandlerFunc {
 				allowed := make([]string, 0, len(roles))
 				for _, role := range roles {
