@@ -12,6 +12,7 @@ import (
 
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/service"
 	module "github.com/darkrain/request-generator"
 	"github.com/darkrain/request-generator/actions"
@@ -114,11 +115,17 @@ func requestContactVerification(pool *sql.DB, conn *amqp.Connection, cfg *config
 			return err
 		}
 		fallback, _ := input["allow_fallback"].(bool)
-		prepared, err := service.PrepareContactVerification(c.Request.Context(), pool, cfg, service.ContactVerificationRequest{
+		request := service.ContactVerificationRequest{
 			UserID: userID, ContactType: inputString(input, "contact_type"), Recipient: inputString(input, "recipient"),
 			DeviceUID: inputString(input, "device_uid"), Provider: inputString(input, "provider"), AllowFallback: fallback,
 			Purpose: "verification",
-		})
+		}
+		if authType, _ := c.Get("auth_type"); authType == "registration" {
+			if err := restrictRegistrationContact(c, &request); err != nil {
+				return err
+			}
+		}
+		prepared, err := service.PrepareContactVerification(c.Request.Context(), pool, cfg, request)
 		if err != nil {
 			return err
 		}
@@ -132,6 +139,27 @@ func requestContactVerification(pool *sql.DB, conn *amqp.Connection, cfg *config
 		}
 		return replaceBody(c, input)
 	}
+}
+
+// restrictRegistrationContact permits a short-lived registration token to
+// resend only the code for the contact used to create its account.
+func restrictRegistrationContact(c *gin.Context, request *service.ContactVerificationRequest) error {
+	var registered string
+	switch request.ContactType {
+	case "email":
+		value, _ := c.Get("email")
+		registered = fmt.Sprint(value)
+	case "phone":
+		value, _ := c.Get("phone")
+		registered = fmt.Sprint(value)
+	default:
+		return fmt.Errorf("registration contact type is invalid")
+	}
+	if strings.TrimSpace(registered) == "" || !strings.EqualFold(strings.TrimSpace(registered), strings.TrimSpace(request.Recipient)) {
+		return fmt.Errorf("registration token can only resend the original contact verification")
+	}
+	request.Purpose = delivery.PurposeRegistrationVerification
+	return nil
 }
 
 func confirmContactVerification(pool *sql.DB, cacheClient *cache.Client, cfg *config.Config) func(*gin.Context) error {

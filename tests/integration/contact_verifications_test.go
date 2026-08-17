@@ -67,4 +67,36 @@ func TestContactVerificationRegistrationAndSecondContact(t *testing.T) {
 	}
 }
 
+func TestRegistrationTokenCanResendOnlyOriginalContact(t *testing.T) {
+	truncateTables(t)
+
+	registration := doRequest("POST", "/auth/register", map[string]interface{}{
+		"login": "resend-registration@example.com", "password": "Password1", "device_uid": "resend-device",
+	}, "")
+	if registration.Code != http.StatusCreated {
+		t.Fatalf("register: expected 201, got %d: %s", registration.Code, registration.Body.String())
+	}
+	registered := parseJSON(registration)
+	registrationToken, _ := registered["registration_token"].(string)
+	initialID, _ := registered["verification_id"].(float64)
+
+	resend := doRequest("PUT", "/auth/contact_verifications", map[string]interface{}{
+		"contact_type": "email", "recipient": "resend-registration@example.com", "device_uid": "resend-device", "allow_fallback": true,
+	}, registrationToken)
+	if resend.Code != http.StatusOK {
+		t.Fatalf("resend: expected 200, got %d: %s", resend.Code, resend.Body.String())
+	}
+	resendID, ok := parseJSON(resend)["value"].(float64)
+	if !ok || resendID <= initialID {
+		t.Fatalf("resend must return a new verification id: %s", resend.Body.String())
+	}
+
+	wrongRecipient := doRequest("PUT", "/auth/contact_verifications", map[string]interface{}{
+		"contact_type": "email", "recipient": "other@example.com", "device_uid": "resend-device", "allow_fallback": true,
+	}, registrationToken)
+	if wrongRecipient.Code < http.StatusBadRequest || wrongRecipient.Code >= http.StatusInternalServerError {
+		t.Fatalf("registration token must reject another recipient, got %d: %s", wrongRecipient.Code, wrongRecipient.Body.String())
+	}
+}
+
 func numberPath(value float64) string { return fmt.Sprintf("%.0f", value) }
