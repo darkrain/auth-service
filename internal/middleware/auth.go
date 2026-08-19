@@ -170,7 +170,8 @@ func touchSession(c *gin.Context, pool *sql.DB, cacheClient *cache.Client, sessi
 
 func registrationVerificationRequest(method, path string) bool {
 	return (method == http.MethodPost && path == "/auth/contact_verifications/:bykey/:value") ||
-		(method == http.MethodPut && path == "/auth/contact_verifications")
+		(method == http.MethodPut && path == "/auth/contact_verifications") ||
+		(method == http.MethodPut && path == "/auth/registration/contact")
 }
 
 // RequireRole middleware checks that the authenticated user has one of the allowed roles.

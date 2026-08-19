@@ -62,6 +62,15 @@ type PreparedContactVerification struct {
 	ExpiresAt time.Time
 }
 
+// RegistrationContactChangeResult contains the new verification request for
+// an existing, not-yet-verified registration. The user ID and registration
+// session stay unchanged, so changing a typo never creates a second account.
+type RegistrationContactChangeResult struct {
+	Login          string
+	VerificationID int64
+	ResendAfterSec int
+}
+
 func PrepareContactVerification(ctx context.Context, pool *sql.DB, cfg *config.Config, request ContactVerificationRequest) (*PreparedContactVerification, error) {
 	request.ContactType = strings.TrimSpace(request.ContactType)
 	request.Recipient = strings.TrimSpace(request.Recipient)
@@ -213,6 +222,87 @@ func CreateContactVerification(ctx context.Context, pool *sql.DB, conn *amqp.Con
 		return 0, err
 	}
 	return id, nil
+}
+
+// ChangeRegistrationContact replaces the login of an unfinished registration,
+// expires every older registration code and creates a code for the new contact.
+// The registration session remains valid and continues to belong to the same
+// user. Updating the login immediately releases the mistyped contact instead of
+// keeping it occupied until confirmation.
+func ChangeRegistrationContact(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *config.Config, request ContactVerificationRequest) (*RegistrationContactChangeResult, error) {
+	request.Purpose = delivery.PurposeRegistrationVerification
+	prepared, err := PrepareContactVerification(ctx, pool, cfg, request)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := pool.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin registration contact change: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var verifyStatus string
+	if err = tx.QueryRowContext(ctx, `SELECT verify_status FROM users WHERE id=$1 FOR UPDATE`, request.UserID).Scan(&verifyStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: registration not found", ErrNotFound)
+		}
+		return nil, fmt.Errorf("load registration: %w", err)
+	}
+	if verifyStatus != "registered" {
+		return nil, fmt.Errorf("%w: registration is already completed", ErrForbidden)
+	}
+
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE contact_verifications
+		SET status='expired', update_date=NOW()
+		WHERE user_id=$1 AND purpose=$2 AND status='pending'`, request.UserID, delivery.PurposeRegistrationVerification); err != nil {
+		return nil, fmt.Errorf("expire previous registration codes: %w", err)
+	}
+
+	switch prepared.ContactType {
+	case "email":
+		_, err = tx.ExecContext(ctx, `
+			UPDATE users
+			SET email=$1, email_verified=false, phone=NULL, phone_verified=false, update_date=NOW()
+			WHERE id=$2`, prepared.Recipient, prepared.UserID)
+	case "phone":
+		_, err = tx.ExecContext(ctx, `
+			UPDATE users
+			SET phone=$1, phone_verified=false, email=NULL, email_verified=false, update_date=NOW()
+			WHERE id=$2`, prepared.Recipient, prepared.UserID)
+	default:
+		return nil, fmt.Errorf("%w: unsupported contact type", ErrValidation)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update registration contact: %w", err)
+	}
+
+	var verificationID int64
+	if err = tx.QueryRowContext(ctx, `
+		INSERT INTO contact_verifications
+			(user_id, contact_type, recipient, device_uid, provider, allow_fallback, purpose, status, code_hash, counter, sent_ts, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		RETURNING id`,
+		prepared.UserID, prepared.ContactType, prepared.Recipient, prepared.DeviceUID, prepared.Provider,
+		prepared.AllowFallback, prepared.Purpose, prepared.Status, prepared.CodeHash, prepared.Counter,
+		prepared.SentAt, prepared.ExpiresAt,
+	).Scan(&verificationID); err != nil {
+		return nil, fmt.Errorf("create changed contact verification: %w", err)
+	}
+
+	if err = PublishContactVerification(ctx, conn, cfg, prepared); err != nil {
+		return nil, fmt.Errorf("publish changed contact verification: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit registration contact change: %w", err)
+	}
+
+	return &RegistrationContactChangeResult{
+		Login:          prepared.Recipient,
+		VerificationID: verificationID,
+		ResendAfterSec: cfg.RateLimit.Code.ResendCooldownSec,
+	}, nil
 }
 
 // ConfirmContactVerification verifies a one-time code and applies the contact

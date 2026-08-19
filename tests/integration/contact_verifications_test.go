@@ -67,7 +67,7 @@ func TestContactVerificationRegistrationAndSecondContact(t *testing.T) {
 	}
 }
 
-func TestRegistrationTokenCanResendOnlyOriginalContact(t *testing.T) {
+func TestRegistrationTokenCanResendOriginalContact(t *testing.T) {
 	truncateTables(t)
 
 	registration := doRequest("POST", "/auth/register", map[string]interface{}{
@@ -104,11 +104,64 @@ func TestRegistrationTokenCanResendOnlyOriginalContact(t *testing.T) {
 		t.Fatalf("resend must return a new verification id: %s", resend.Body.String())
 	}
 
-	wrongRecipient := doRequest("PUT", "/auth/contact_verifications", map[string]interface{}{
-		"contact_type": "email", "recipient": "other@example.com", "device_uid": "resend-device", "allow_fallback": true,
+}
+
+func TestRegistrationContactChangeKeepsAccountAndInvalidatesOldCode(t *testing.T) {
+	truncateTables(t)
+
+	registration := doRequest("POST", "/auth/register", map[string]interface{}{
+		"login": "mistyped@example.com", "password": "Password1", "role": "model", "device_uid": "change-device",
+	}, "")
+	if registration.Code != http.StatusCreated {
+		t.Fatalf("register: expected 201, got %d: %s", registration.Code, registration.Body.String())
+	}
+	registered := parseJSON(registration)
+	registrationToken, _ := registered["registration_token"].(string)
+	oldVerificationID, _ := registered["verification_id"].(float64)
+
+	changed := doRequest("PUT", "/auth/registration/contact", map[string]interface{}{
+		"login": "corrected@example.com", "device_uid": "change-device", "allow_fallback": true,
 	}, registrationToken)
-	if wrongRecipient.Code < http.StatusBadRequest || wrongRecipient.Code >= http.StatusInternalServerError {
-		t.Fatalf("registration token must reject another recipient, got %d: %s", wrongRecipient.Code, wrongRecipient.Body.String())
+	if changed.Code != http.StatusOK {
+		t.Fatalf("change contact: expected 200, got %d: %s", changed.Code, changed.Body.String())
+	}
+	changedBody := parseJSON(changed)
+	newVerificationID, ok := changedBody["verification_id"].(float64)
+	if !ok || newVerificationID <= oldVerificationID {
+		t.Fatalf("change contact must return a new verification id: %s", changed.Body.String())
+	}
+
+	var usersCount int
+	var login, role, oldStatus string
+	if err := testPool.QueryRowContext(context.Background(), `
+		SELECT COUNT(*), MAX(COALESCE(email,'')), MAX(role)
+		FROM users WHERE role != 'system'`).Scan(&usersCount, &login, &role); err != nil {
+		t.Fatal(err)
+	}
+	if usersCount != 1 || login != "corrected@example.com" || role != "model" {
+		t.Fatalf("contact change must keep one account and its role: count=%d login=%q role=%q", usersCount, login, role)
+	}
+	if err := testPool.QueryRowContext(context.Background(), `SELECT status FROM contact_verifications WHERE id=$1`, int64(oldVerificationID)).Scan(&oldStatus); err != nil {
+		t.Fatal(err)
+	}
+	if oldStatus != "expired" {
+		t.Fatalf("old verification must be expired, got %q", oldStatus)
+	}
+
+	oldCode := doRequest("POST", "/auth/contact_verifications/id/"+numberPath(oldVerificationID), map[string]string{"code": "000000"}, registrationToken)
+	if oldCode.Code == http.StatusOK {
+		t.Fatal("old verification code must not confirm after contact change")
+	}
+
+	confirmed := doRequest("POST", "/auth/contact_verifications/id/"+numberPath(newVerificationID), map[string]string{"code": "333333"}, registrationToken)
+	if confirmed.Code != http.StatusOK {
+		t.Fatalf("confirm changed contact: expected 200, got %d: %s", confirmed.Code, confirmed.Body.String())
+	}
+	loginResponse := doRequest("POST", "/auth/login", map[string]string{
+		"login": "corrected@example.com", "password": "Password1", "device_uid": "change-device",
+	}, "")
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("login with changed contact: expected 200, got %d: %s", loginResponse.Code, loginResponse.Body.String())
 	}
 }
 

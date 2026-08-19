@@ -21,6 +21,7 @@ A lightweight authentication and authorization microservice built with Go and Gi
 |--------|------|------|-------------|
 | GET | `/health` | — | Service health check |
 | POST | `/auth/register` | — | Register a new user |
+| PUT | `/auth/registration/contact` | Registration Bearer | Change the contact of an unfinished registration and send a new code |
 | POST | `/auth/login` | — | Login with email/phone + password |
 | POST | `/auth/logout` | Bearer | Logout and invalidate token |
 | PUT | `/auth/contact_verifications` | Bearer | Request verification for an additional email or phone |
@@ -131,6 +132,26 @@ Authorization: Bearer <registration_token>
 
 { "code": "123456" }
 ```
+
+Before confirmation, a user may correct the contact without creating another
+account. The operation keeps the same user, password, role and registration
+session, replaces the login, expires every older registration code and sends a
+new code:
+
+```json
+PUT /auth/registration/contact
+Authorization: Bearer <registration_token>
+
+{
+  "login": "corrected@example.com",
+  "device_uid": "web-device-123",
+  "allow_fallback": true
+}
+```
+
+The response contains the new `verification_id`. Expired unfinished
+registrations are removed by the hourly auth cleanup after their registration
+token TTL; this releases mistyped email addresses and phone numbers.
 
 For an authenticated account, the same module adds a missing second sign-in
 contact. The authenticated user ID comes from `GET /auth/me`; the account

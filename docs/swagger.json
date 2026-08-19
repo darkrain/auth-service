@@ -497,6 +497,63 @@
                     }
                 }
             }
+        },
+        "/auth/registration/contact": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Replaces the email or phone on the existing registered user, invalidates older registration codes and sends a new code. Requires a registration token.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Change the contact of an unfinished registration",
+                "parameters": [
+                    {
+                        "description": "New registration contact",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.registrationContactRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.registrationContactResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -657,6 +714,46 @@
                 "verification_id": {
                     "type": "integer",
                     "example": 42
+                }
+            }
+        },
+        "handler.registrationContactRequest": {
+            "type": "object",
+            "properties": {
+                "allow_fallback": {
+                    "type": "boolean"
+                },
+                "device_uid": {
+                    "type": "string",
+                    "example": "device-uuid-1234"
+                },
+                "login": {
+                    "type": "string",
+                    "example": "corrected@example.com"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "email"
+                }
+            }
+        },
+        "handler.registrationContactResponse": {
+            "type": "object",
+            "properties": {
+                "login": {
+                    "type": "string",
+                    "example": "corrected@example.com"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "resend_after_sec": {
+                    "type": "integer",
+                    "example": 60
+                },
+                "verification_id": {
+                    "type": "integer",
+                    "example": 43
                 }
             }
         },
