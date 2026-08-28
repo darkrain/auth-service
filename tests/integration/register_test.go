@@ -1,8 +1,11 @@
 package integration
 
 import (
+	"context"
 	"net/http"
 	"testing"
+
+	"github.com/darkrain/auth-service/internal/db"
 )
 
 func TestRegister_Success_Email(t *testing.T) {
@@ -226,5 +229,35 @@ func TestRegister_NoRole_DefaultsToFirstAllowedRole(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201 for empty role (default), got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestExpiredRegistrationCleanupReleasesLogin(t *testing.T) {
+	truncateTables(t)
+	const login = "abandoned@example.com"
+	registerUser(t, login, "Password1")
+
+	if _, err := testPool.ExecContext(context.Background(), `
+		UPDATE users SET creation_date=NOW() - INTERVAL '2 hours' WHERE email=$1`, login); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.ExecContext(context.Background(), `
+		UPDATE sessions SET expire_date=NOW() - INTERVAL '1 minute' WHERE user_id=(SELECT id FROM users WHERE email=$1)`, login); err != nil {
+		t.Fatal(err)
+	}
+
+	registrations, _, err := db.CleanupExpiredSessionsAndRegistrations(context.Background(), testPool, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registrations != 1 {
+		t.Fatalf("expected one abandoned registration to be deleted, got %d", registrations)
+	}
+
+	w := doRequest("POST", "/auth/register", map[string]string{
+		"login": login, "password": "Password1",
+	}, "")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("released login must be reusable, got %d: %s", w.Code, w.Body.String())
 	}
 }

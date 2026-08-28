@@ -96,8 +96,8 @@ func main() {
 			log.Printf("WARNING: seed failed: %v", err)
 		}
 
-		// LOW: background goroutine to clean up expired sessions every 24h
-		db.StartSessionCleanup(ctx, pgPool, log.Default())
+		// Release abandoned registration contacts and remove expired sessions.
+		db.StartSessionCleanup(ctx, pgPool, log.Default(), cfg.RegistrationTokenTTLMin)
 	}
 
 	cacheClient := cache.NewClient(cfg)
@@ -203,6 +203,7 @@ func main() {
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pgPool, cacheClient))
+	authRequired.PUT("/auth/registration/contact", handler.ChangeRegistrationContact(pgPool, rmqConn, cfg, cacheClient))
 
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")

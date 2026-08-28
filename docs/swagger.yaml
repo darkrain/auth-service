@@ -113,6 +113,34 @@ definitions:
         example: 42
         type: integer
     type: object
+  handler.registrationContactRequest:
+    properties:
+      allow_fallback:
+        type: boolean
+      device_uid:
+        example: device-uuid-1234
+        type: string
+      login:
+        example: corrected@example.com
+        type: string
+      provider:
+        example: email
+        type: string
+    type: object
+  handler.registrationContactResponse:
+    properties:
+      login:
+        example: corrected@example.com
+        type: string
+      message:
+        type: string
+      resend_after_sec:
+        example: 60
+        type: integer
+      verification_id:
+        example: 43
+        type: integer
+    type: object
   handler.resetConfirmBody:
     properties:
       code:
@@ -481,6 +509,43 @@ paths:
           schema:
             $ref: '#/definitions/handler.errorResponse'
       summary: Register a new user
+      tags:
+      - auth
+  /auth/registration/contact:
+    put:
+      consumes:
+      - application/json
+      description: Replaces the email or phone on the existing registered user, invalidates
+        older registration codes and sends a new code. Requires a registration token.
+      parameters:
+      - description: New registration contact
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.registrationContactRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.registrationContactResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Change the contact of an unfinished registration
       tags:
       - auth
 securityDefinitions:
