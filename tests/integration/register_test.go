@@ -70,7 +70,7 @@ func TestRegister_WeakPassword_TooShort(t *testing.T) {
 	}
 }
 
-func TestRegister_WeakPassword_NoDigit(t *testing.T) {
+func TestRegister_AllowsWeakPasswordAfterMinimumLength(t *testing.T) {
 	truncateTables(t)
 
 	w := doRequest("POST", "/auth/register", map[string]string{
@@ -78,8 +78,8 @@ func TestRegister_WeakPassword_NoDigit(t *testing.T) {
 		"password": "PasswordNoDigit",
 	}, "")
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for password without digit, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected weak password registration to succeed, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

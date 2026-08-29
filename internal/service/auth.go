@@ -238,8 +238,9 @@ func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 		}
 	}
 
-	// 2. Password complexity
-	if err := validatePassword(req.Password, cfg); err != nil {
+	// Registration enforces only the configured minimum length. Complexity is a
+	// client-side strength warning, not a reason to reject a usable account.
+	if err := validateRegistrationPassword(req.Password, cfg); err != nil {
 		return nil, err
 	}
 
@@ -348,6 +349,13 @@ func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 		VerificationID:    verificationID,
 		ResendAfterSec:    cfg.RateLimit.Code.ResendCooldownSec,
 	}, nil
+}
+
+func validateRegistrationPassword(password string, cfg *config.Config) error {
+	if cfg.PasswordMinLength > 0 && len(password) < cfg.PasswordMinLength {
+		return fmt.Errorf("%w: password must be at least %d characters", ErrValidation, cfg.PasswordMinLength)
+	}
+	return nil
 }
 
 // validatePassword checks password complexity against config rules.
