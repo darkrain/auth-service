@@ -97,6 +97,10 @@ func Login(ctx context.Context, pool *sql.DB, cfg *config.Config, cacheClient *c
 	switch verifyStatus {
 	case "verified":
 		// OK
+	case "draft", "unverified", "onverify":
+		// Profile verification is still ahead or under way. The account owns a
+		// real identity already, so it signs in and looks around; what is still
+		// gated is being listed and taking work, not reading the app.
 	case "registered":
 		return nil, fmt.Errorf("%w: Account not verified. Please verify your email or phone.", ErrForbidden)
 	case "banned":
