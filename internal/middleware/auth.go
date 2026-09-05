@@ -43,7 +43,7 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 		// 1. Check Redis cache
 		if cacheClient != nil {
 			if sd, err := cacheClient.GetSession(c.Request.Context(), token); err == nil && sd != nil {
-				if sd.AuthType != "registration" && sd.VerifyStatus != "verified" {
+				if sd.AuthType != "registration" && !activeVerifyStatus(sd.VerifyStatus) {
 					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account is not active", "code": codeUnauthorized})
 					return
 				}
@@ -101,7 +101,7 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has expired", "code": codeUnauthorized})
 			return
 		}
-		if authType != "registration" && verifyStatus != "verified" {
+		if authType != "registration" && !activeVerifyStatus(verifyStatus) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account is not active", "code": codeUnauthorized})
 			return
 		}
@@ -166,6 +166,19 @@ func touchSession(c *gin.Context, pool *sql.DB, cacheClient *cache.Client, sessi
 		}
 	}
 	_, _ = pool.ExecContext(c.Request.Context(), `UPDATE sessions SET last_seen_at=NOW(), update_date=NOW() WHERE id=$1 AND blocked=false`, sessionID)
+}
+
+// activeVerifyStatus tells whether a session may be used. Profile verification
+// is a separate story from having an account: a profile that is still being
+// checked belongs to a person who signs in and reads the app, and what the
+// check gates is being listed and taking work.
+func activeVerifyStatus(status string) bool {
+	switch status {
+	case "verified", "draft", "unverified", "onverify":
+		return true
+	default:
+		return false
+	}
 }
 
 func registrationVerificationRequest(method, path string) bool {
