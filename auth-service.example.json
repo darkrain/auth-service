@@ -35,6 +35,7 @@
   },
   "SessionTTLDays": 30,
   "RegistrationTokenTTLMin": 30,
+  "RegistrationPolicyFunction": "",
   "TwoFactorEnabled": false,
   "TwoFactorIssuer": "Auth Service",
   "TwoFactorEncryptionKey": "",

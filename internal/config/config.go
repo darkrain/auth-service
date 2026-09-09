@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 )
 
 type RateLimitIP struct {
@@ -80,6 +81,9 @@ type CodeDeliveryPhoneConfig struct {
 }
 
 type Config struct {
+	// Optional application-owned PostgreSQL admission function (schema.name).
+	// Called inside registration's transaction with one JSONB argument.
+	RegistrationPolicyFunction    string              `json:"RegistrationPolicyFunction"`
 	Host                          string              `json:"Host"`
 	Port                          string              `json:"Port"`
 	PasswordSalt                  string              `json:"PasswordSalt"`
@@ -238,6 +242,9 @@ func (c *Config) Validate() error {
 		return errors.New("config: CodeDelivery provider configuration is incomplete")
 	}
 
+	if c.RegistrationPolicyFunction != "" && !regexp.MustCompile(`^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$`).MatchString(c.RegistrationPolicyFunction) {
+		return errors.New("config: RegistrationPolicyFunction must be schema.function")
+	}
 	for _, role := range c.AllowedRoles {
 		if role == "admin" || role == "system" {
 			return fmt.Errorf("config: AllowedRoles must not contain reserved role %q", role)
