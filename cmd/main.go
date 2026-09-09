@@ -214,9 +214,12 @@ func main() {
 
 	if pgPool != nil {
 		moduleDB := rgdb.NewDB(pgPool)
-		generator := rg.NewGenerator(
+		moduleRoutes := r.Group("/")
+		var generator *rg.Generator
+		moduleRoutes.Use(func(c *gin.Context) { middleware.GeneratorContext(generator)(c) })
+		generator = rg.NewGenerator(
 			func(*rg.BaseModule) rgdb.DBExecutor { return moduleDB },
-			*r.Group("/"),
+			*moduleRoutes,
 			[]*rg.BaseModule{
 				authmodules.ContactVerificationsModule(pgPool, rmqConn, cacheClient, cfg),
 				authmodules.AccountSecurityModule(pgPool, cfg),

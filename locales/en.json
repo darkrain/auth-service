@@ -28,12 +28,15 @@
       "actions": { "list": "Active sessions", "delete": "Revoke session" }
     },
     "deactivate": {
+      "unavailable": "The account could not be deactivated. No account changes were saved.",
+      "credentials_invalid": "Check your current password, confirmation and two-factor code.",
       "label": "Account deactivation",
       "action": "Disable",
       "deactivated_at": "Deactivated"
     },
     "status": { "verified": "Verified", "not_verified": "Not verified" }
   },
+  "wallet": { "errors": { "pending_payout": "Wait for the open payout request to finish before deleting the account." } },
   "contact_verifications": {
     "label": "Contact verification",
     "actions": { "list": "Contact verifications", "view": "View verification", "add": "Send code", "update": "Confirm code", "defrec": "New contact verification" },
