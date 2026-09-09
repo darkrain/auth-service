@@ -31,6 +31,7 @@ type login2FAResponse struct {
 }
 
 type registerRequest struct {
+	Invitation    string `json:"invitation,omitempty"`
 	Login         string `json:"login" example:"user@example.com"`
 	Password      string `json:"password" example:"Secret123!"`
 	Role          string `json:"role" example:"model"`
@@ -236,10 +237,15 @@ func Register(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) gin.Handl
 		}
 
 		result, err := service.Register(c.Request.Context(), pool, conn, cfg, service.RegisterRequest{
+			Invitation: req.Invitation, IP: c.ClientIP(),
 			Login: req.Login, Password: req.Password, Role: req.Role, DeviceUID: req.DeviceUID,
 			Provider: req.Provider, AllowFallback: req.AllowFallback,
 		})
 		if err != nil {
+			if errors.Is(err, service.ErrRegistrationPolicy) {
+				c.JSON(http.StatusBadRequest, errResp("ERR_REGISTRATION_POLICY", "Registration requirements were not met. Check your invitation."))
+				return
+			}
 			if errors.Is(err, service.ErrInvalidEmail) {
 				c.JSON(http.StatusBadRequest, errResp(CodeInvalidEmail, "Invalid email format"))
 				return

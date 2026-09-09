@@ -99,6 +99,20 @@ creates and validates the code, then publishes this stable payload to RabbitMQ:
 
 ## Registration And Contact Verification
 
+An optional `RegistrationPolicyFunction` (`schema.function`, lowercase SQL
+identifiers only) enables an application-owned PostgreSQL admission policy.
+The function accepts one JSONB argument containing server-generated `user_id`,
+resolved `role`, `invitation` from the registration request, `device_uid` and
+the IP resolved through configured `TrustedProxies`. Passwords and tokens are
+not included. The auth service contains no referral rates or product roles.
+
+The account, policy effects and registration session commit in one transaction.
+A policy `23514` rejection returns `ERR_REGISTRATION_POLICY` without SQL details
+and leaves neither an occupied login nor a session. Infrastructure errors remain
+server errors. Install the function before setting this option; an empty value
+preserves registration without an application admission policy. Verification
+delivery starts after this transaction and retains its existing retry flow.
+
 Registration always creates an unverified account and returns a short-lived
 `registration_token` plus the ID of the verification record. The token is only
 accepted by the confirmation action for that record; it cannot read account
