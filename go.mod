@@ -6,7 +6,7 @@ require (
 	github.com/darkrain/request-generator v0.0.0-20260814222314-96efa5e438ac
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-jet/jet/v2 v2.16.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pquerna/otp v1.5.0
 	github.com/rabbitmq/amqp091-go v1.14.0
 	github.com/redis/go-redis/v9 v9.20.1
