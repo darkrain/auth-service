@@ -82,7 +82,10 @@ func Login(pool *sql.DB, _ *amqp.Connection, cfg *config.Config, cacheClient *ca
 		}
 
 		// Determine client IP
-		ip := c.GetHeader("X-Real-IP")
+		// The caller cannot be allowed to name its own address here: the value
+		// keys lockout counters and lands in the security log. ClientIP trusts a
+		// forwarded header only from a proxy SetTrustedProxies names.
+		ip := c.ClientIP()
 		if ip == "" {
 			ip = c.Request.RemoteAddr
 		}
