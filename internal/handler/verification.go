@@ -40,7 +40,10 @@ func VerifyLogin2FA(pool *sql.DB, cfg *config.Config, cacheClient *cache.Client)
 			return
 		}
 
-		ip := c.GetHeader("X-Real-IP")
+		// The caller cannot be allowed to name its own address here: the value
+		// keys lockout counters and lands in the security log. ClientIP trusts a
+		// forwarded header only from a proxy SetTrustedProxies names.
+		ip := c.ClientIP()
 		if ip == "" {
 			ip = c.Request.RemoteAddr
 		}
