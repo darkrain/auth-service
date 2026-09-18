@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -82,7 +83,10 @@ func Login(pool *sql.DB, _ *amqp.Connection, cfg *config.Config, cacheClient *ca
 		}
 
 		// Determine client IP
-		ip := c.GetHeader("X-Real-IP")
+		// The caller cannot be allowed to name its own address here: the value
+		// keys lockout counters and lands in the security log. ClientIP trusts a
+		// forwarded header only from a proxy SetTrustedProxies names.
+		ip := c.ClientIP()
 		if ip == "" {
 			ip = c.Request.RemoteAddr
 		}
@@ -113,6 +117,9 @@ func Login(pool *sql.DB, _ *amqp.Connection, cfg *config.Config, cacheClient *ca
 			case errors.Is(err, service.ErrUnauthorized):
 				c.JSON(http.StatusUnauthorized, errResp(CodeInvalidCredentials, "invalid credentials"))
 			default:
+				// An error nobody expected here left no trace at all: sign-in
+				// answered 500 and the log held only the status line.
+				log.Printf("login failed unexpectedly: %v", err)
 				c.JSON(http.StatusInternalServerError, errResp(CodeInternal, "internal server error"))
 			}
 			return

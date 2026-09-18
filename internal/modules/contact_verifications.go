@@ -82,10 +82,15 @@ func ContactVerificationsModule(pool *sql.DB, conn *amqp.Connection, cacheClient
 	}}
 }
 
+// Confirming your own phone or e-mail is not a role's privilege - every
+// account has the page that asks for it. Staff roles are not registrable, so
+// they never appear in AllowedRoles: support signed in and the page answered
+// 403.
 func authenticatedRoles(cfg *config.Config) []actions.Role {
-	roles := make([]actions.Role, 0, len(cfg.AllowedRoles)+3)
+	staff := []string{"admin", "system", "sudo", "support"}
+	roles := make([]actions.Role, 0, len(cfg.AllowedRoles)+len(staff))
 	seen := map[actions.Role]struct{}{}
-	for _, role := range append(append([]string(nil), cfg.AllowedRoles...), "admin", "system", "sudo") {
+	for _, role := range append(append([]string(nil), cfg.AllowedRoles...), staff...) {
 		value := actions.Role(role)
 		if _, exists := seen[value]; exists {
 			continue

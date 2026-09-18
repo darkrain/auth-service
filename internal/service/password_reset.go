@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"math/big"
@@ -18,8 +17,28 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// hashConfirmCode and confirmCodeMatches keep confirm_codes.code out of the
+// database in readable form. A six-digit code is a credential: anyone who can
+// read the table could finish a password reset for any account, which a
+// password hash does not allow. Contact verifications already store a hash.
+func hashConfirmCode(code string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("hash confirm code: %w", err)
+	}
+	return string(hash), nil
+}
+
+func confirmCodeMatches(storedHash, code string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(code)) == nil
+}
+
 // ErrInvalidCode is returned when the reset code does not match.
 var ErrInvalidCode = errors.New("invalid reset code")
+
+// ErrTooManyCodeAttempts is returned when a reset code has been guessed at too
+// many times; the code must be requested again.
+var ErrTooManyCodeAttempts = errors.New("too many reset code attempts")
 
 // ErrCodeExpired is returned when the reset code has expired.
 var ErrCodeExpired = errors.New("reset code has expired")
@@ -116,12 +135,16 @@ func RequestPasswordReset(
 	ttlSec := cfg.PasswordResetCodeTTLMin * 60
 
 	// UPSERT into confirm_codes with auth_type='password_reset'
+	storedCode, hashErr := hashConfirmCode(code)
+	if hashErr != nil {
+		return hashErr
+	}
 	_, upsertErr := pool.ExecContext(ctx,
 		`INSERT INTO confirm_codes (device_uid, recipient, code, counter, sent_ts, auth_type)
 		 VALUES ($1, $2, $3, 0, $4, $5)
 		 ON CONFLICT (device_uid, recipient, auth_type) DO UPDATE
 		 SET code = EXCLUDED.code, counter = 0, sent_ts = EXCLUDED.sent_ts`,
-		deviceUID, login, code, now, authTypePasswordReset,
+		deviceUID, login, storedCode, now, authTypePasswordReset,
 	)
 	if upsertErr != nil {
 		return fmt.Errorf("db: upsert confirm_codes: %w", upsertErr)
@@ -192,8 +215,16 @@ func ConfirmPasswordReset(
 		}
 	}
 
+	// A six-digit code with no cap on guesses is not a secret: the counter
+	// below was incremented on every wrong answer and never read, so the whole
+	// space could be walked through. The contact-verification path already
+	// answers this way.
+	if cfg.RateLimit.Code.MaxAttempts > 0 && counter >= int64(cfg.RateLimit.Code.MaxAttempts) {
+		return ErrTooManyCodeAttempts
+	}
+
 	// Compare code
-	if subtle.ConstantTimeCompare([]byte(code), []byte(storedCode)) != 1 {
+	if !confirmCodeMatches(storedCode, code) {
 		// Increment counter
 		_, _ = pool.ExecContext(ctx,
 			`UPDATE confirm_codes SET counter=counter+1

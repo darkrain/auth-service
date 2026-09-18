@@ -27,8 +27,12 @@ func RateLimit(cacheClient *cache.Client, conn *amqp.Connection, endpoint string
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
 
-		// 1. Get client IP (prefer X-Real-IP, strip port from RemoteAddr)
-		ip := c.GetHeader("X-Real-IP")
+		// 1. Get client IP. Reading X-Real-IP directly handed the caller its own
+		// rate-limit bucket: a new value per request meant no limit at all, and
+		// the service port is reachable without passing the proxy that overwrites
+		// the header. ClientIP honours forwarded headers only from the proxies
+		// SetTrustedProxies names and otherwise uses the peer address.
+		ip := c.ClientIP()
 		if ip == "" {
 			host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
 			if err != nil {
