@@ -76,6 +76,17 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// Redis is required for session caching and rate limiting. Check it before
+	// database migrations or seed, and never report a broken cache as ready.
+	cacheCtx, cancelCache := context.WithTimeout(ctx, 5*time.Second)
+	cacheClient, err := cache.Connect(cacheCtx, cfg)
+	cancelCache()
+	if err != nil {
+		log.Fatalf("Redis is required; check RedisDatabaseHost, RedisDatabasePort and RedisPassword: %v", err)
+	}
+	defer cacheClient.Close()
+	log.Println("Redis connected")
+
 	// PostgreSQL
 	var pgPool *sql.DB
 	rawPool, err := db.Connect(cfg)
@@ -99,17 +110,6 @@ func main() {
 		// Release abandoned registration contacts and remove expired sessions.
 		db.StartSessionCleanup(ctx, pgPool, log.Default(), cfg.RegistrationTokenTTLMin)
 	}
-
-	cacheClient := cache.NewClient(cfg)
-
-	// Ping Redis in background — don't block startup
-	go func() {
-		if err := cacheClient.Ping(context.Background()); err != nil {
-			log.Printf("WARNING: Redis not available: %v", err)
-		} else {
-			log.Println("Redis connected")
-		}
-	}()
 
 	// RabbitMQ is not needed in explicitly isolated test mode.
 	var rmqConn *amqp.Connection
@@ -165,6 +165,13 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
+
+	r.GET("/ready", handler.Readiness(func(ctx context.Context) error {
+		if pgPool == nil {
+			return fmt.Errorf("PostgreSQL is not connected")
+		}
+		return pgPool.PingContext(ctx)
+	}, cacheClient.Ping))
 
 	// LOW: Swagger UI gated by config flag (disabled by default in production)
 	if cfg.SwaggerEnabled {
