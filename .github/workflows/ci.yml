@@ -97,5 +97,19 @@ jobs:
             }
           }
           EOF
+      - name: Check readiness and Redis startup credentials
+        run: |
+          docker run --detach --rm --name auth-cache-regression \
+            -p 127.0.0.1:6381:6379 redis:7 \
+            redis-server --requirepass regression-only
+          trap 'docker stop auth-cache-regression >/dev/null' EXIT
+          for attempt in $(seq 1 20); do
+            if docker exec auth-cache-regression redis-cli -a regression-only ping 2>/dev/null | grep -qx PONG; then
+              break
+            fi
+            sleep 0.5
+          done
+          REDIS_TEST_ADDR=127.0.0.1:6381 REDIS_TEST_PASSWORD=regression-only \
+            go test -v -race -timeout 120s ./internal/... ./cmd/...
       - name: Run integration tests
         run: go test -v -race -timeout 120s ./tests/integration/...

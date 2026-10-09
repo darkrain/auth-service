@@ -19,7 +19,8 @@ A lightweight authentication and authorization microservice built with Go and Gi
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/health` | — | Service health check |
+| GET | `/health` | — | HTTP process liveness |
+| GET | `/ready` | — | PostgreSQL and Redis readiness (200 or 503) |
 | POST | `/auth/register` | — | Register a new user |
 | PUT | `/auth/registration/contact` | Registration Bearer | Change the contact of an unfinished registration and send a new code |
 | POST | `/auth/login` | — | Login with email/phone + password |
@@ -263,7 +264,31 @@ To use a custom config:
 go run ./cmd/main.go --config /path/to/config.json
 ```
 
+Redis is required at startup. The service verifies its connection and credentials
+with a five-second deadline before database migration/seed and before opening the
+HTTP listener. An unavailable Redis or incorrect `RedisPassword` exits nonzero;
+fix the config or start Redis before restarting auth-service. This replaces the
+previous warning-only startup, which could silently bypass the session cache.
+
+Use `GET /ready` for deployment checks: it checks PostgreSQL and Redis again on
+each request with a two-second deadline and returns 503 when either is unavailable.
+`/health` remains a liveness check. An anonymous 401 from `/auth/me` only proves
+that HTTP routing works; it does not verify the cache. If Redis fails after startup,
+the existing authentication fallback remains available, but `/ready` reports failure.
+
 ## Testing
+
+### Readiness and Redis startup regression
+
+```bash
+go test ./internal/... ./cmd/...
+```
+
+To also exercise the correct/wrong-password handshake, run an isolated Redis
+with a password and pass its address and password through `REDIS_TEST_ADDR` and
+`REDIS_TEST_PASSWORD`. CI creates a disposable instance for this check; the test
+does not flush Redis or read application keys. Readiness tests cover dependency
+failure, recovery, missing PostgreSQL and the probe deadline.
 
 ### Integration Tests
 

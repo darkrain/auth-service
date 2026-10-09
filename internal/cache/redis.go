@@ -39,11 +39,26 @@ type Client struct {
 // NewClient creates a Redis client from config.
 func NewClient(cfg *config.Config) *Client {
 	rdb := redis.NewClient(&redis.Options{
-		Network:  cfg.RedisDatabaseNetwork,
-		Addr:     cfg.RedisDatabaseHost + ":" + cfg.RedisDatabasePort,
-		Password: cfg.RedisPassword,
+		Network:               cfg.RedisDatabaseNetwork,
+		Addr:                  cfg.RedisDatabaseHost + ":" + cfg.RedisDatabasePort,
+		Password:              cfg.RedisPassword,
+		ContextTimeoutEnabled: true,
 	})
 	return &Client{rdb: rdb}
+}
+
+// Connect validates the configured Redis credentials before the service accepts traffic.
+func Connect(ctx context.Context, cfg *config.Config) (*Client, error) {
+	client := NewClient(cfg)
+	if err := client.Ping(ctx); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("Redis connection check failed: %w", err)
+	}
+	return client, nil
+}
+
+func (c *Client) Close() error {
+	return c.rdb.Close()
 }
 
 // Ping checks the Redis connection.
