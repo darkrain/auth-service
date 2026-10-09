@@ -128,13 +128,17 @@ func SendCode(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 	now := time.Now()
 
 	// UPSERT into confirm_codes
+	storedCode, hashErr := hashConfirmCode(code)
+	if hashErr != nil {
+		return hashErr
+	}
 	if pool != nil {
 		_, upsertErr := pool.ExecContext(ctx,
 			`INSERT INTO confirm_codes (device_uid, recipient, code, counter, sent_ts, auth_type)
 			 VALUES ($1, $2, $3, 0, $4, 'verification')
 			 ON CONFLICT (device_uid, recipient, auth_type) DO UPDATE
 			 SET code = EXCLUDED.code, counter = 0, sent_ts = EXCLUDED.sent_ts`,
-			deviceUID, recipient, code, now,
+			deviceUID, recipient, storedCode, now,
 		)
 		if upsertErr != nil {
 			return fmt.Errorf("db: upsert confirm_codes: %w", upsertErr)

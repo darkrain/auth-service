@@ -53,7 +53,10 @@ func ResetRequest(pool *sql.DB, conn *amqp.Connection, cfg *config.Config, cache
 			return
 		}
 
-		ip := c.GetHeader("X-Real-IP")
+		// The caller cannot be allowed to name its own address here: the value
+		// keys lockout counters and lands in the security log. ClientIP trusts a
+		// forwarded header only from a proxy SetTrustedProxies names.
+		ip := c.ClientIP()
 		if ip == "" {
 			ip = c.Request.RemoteAddr
 		}
@@ -104,6 +107,8 @@ func ResetConfirm(pool *sql.DB, cfg *config.Config, cacheClient *cache.Client) g
 				c.JSON(http.StatusBadRequest, errResp(CodeCodeExpired, "reset code has expired"))
 			case errors.Is(err, service.ErrInvalidCode):
 				c.JSON(http.StatusBadRequest, errResp(CodeInvalidCode, "invalid reset code"))
+			case errors.Is(err, service.ErrTooManyCodeAttempts):
+				c.JSON(http.StatusTooManyRequests, errResp(CodeTooManyRequests, "too many attempts, request a new reset code"))
 			case errors.Is(err, service.ErrWeakPassword):
 				c.JSON(http.StatusBadRequest, errResp(CodeWeakPassword, strings.TrimPrefix(err.Error(), "validation error: ")))
 			case errors.Is(err, service.ErrValidation):
