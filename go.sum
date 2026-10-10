@@ -38,8 +38,8 @@ github.com/gin-contrib/sse v1.1.0 h1:n0w2GMuUpWDVp7qSpvze6fAu9iRxJY4Hmj6AmBOU05w
 github.com/gin-contrib/sse v1.1.0/go.mod h1:hxRZ5gVpWMT7Z0B0gSNYqqsSCNIJMjzvm6fqCz9vjwM=
 github.com/gin-gonic/gin v1.12.0 h1:b3YAbrZtnf8N//yjKeU2+MQsh2mY5htkZidOM7O0wG8=
 github.com/gin-gonic/gin v1.12.0/go.mod h1:VxccKfsSllpKshkBWgVgRniFFAzFb9csfngsqANjnLc=
-github.com/go-jet/jet/v2 v2.16.0 h1:R6gpEPAVVvpSBaU4wM2bnR+j5hT6lqYgfrdfzr+NPm8=
-github.com/go-jet/jet/v2 v2.16.0/go.mod h1:MILY2HK89zo7ODycULCCWLnwNklbMJkw4L5notrLpIA=
+github.com/go-jet/jet/v2 v2.16.1 h1:gbU2gGVv/Nn0eiUsnSxO8ABIQLjx4oUzMb1uO/3sUtg=
+github.com/go-jet/jet/v2 v2.16.1/go.mod h1:MILY2HK89zo7ODycULCCWLnwNklbMJkw4L5notrLpIA=
 github.com/go-openapi/jsonpointer v0.19.3/go.mod h1:Pl9vOtqEWErmShwVjC8pYs9cog34VGT37dQOVbmoatg=
 github.com/go-openapi/jsonpointer v0.19.5 h1:gZr+CIYByUqjcgeLXnQu2gHYQC9o73G2XUeOFYEICuY=
 github.com/go-openapi/jsonpointer v0.19.5/go.mod h1:Pl9vOtqEWErmShwVjC8pYs9cog34VGT37dQOVbmoatg=
