@@ -36,6 +36,7 @@ import (
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/db"
+	"github.com/darkrain/auth-service/internal/diagnostics"
 	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/middleware"
 	authmodules "github.com/darkrain/auth-service/internal/modules"
@@ -124,7 +125,18 @@ func main() {
 	}
 
 	// HTTP server
-	r := gin.Default()
+	var r *gin.Engine
+	if os.Getenv("IAMFREE_AUTH_DIAGNOSTICS") == "1" {
+		observer, closeDiagnostics, err := diagnostics.Start()
+		if err != nil {
+			log.Fatalf("Auth diagnostics: %v", err)
+		}
+		defer closeDiagnostics()
+		r = gin.New()
+		r.Use(gin.LoggerWithWriter(observer.LogWriter(gin.DefaultWriter)), gin.Recovery(), observer.Handler())
+	} else {
+		r = gin.Default()
+	}
 
 	// HIGH-4: configure trusted proxies from config
 	if len(cfg.TrustedProxies) > 0 {
