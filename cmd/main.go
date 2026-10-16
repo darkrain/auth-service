@@ -126,6 +126,7 @@ func main() {
 
 	// HTTP server
 	var r *gin.Engine
+	filteredAccessLog := os.Getenv("IAMFREE_HTTP_ACCESS_LOG") == "filtered"
 	if os.Getenv("IAMFREE_AUTH_DIAGNOSTICS") == "1" {
 		observer, closeDiagnostics, err := diagnostics.Start()
 		if err != nil {
@@ -133,9 +134,10 @@ func main() {
 		}
 		defer closeDiagnostics()
 		r = gin.New()
-		r.Use(gin.LoggerWithWriter(observer.LogWriter(gin.DefaultWriter)), gin.Recovery(), observer.Handler())
+		r.Use(middleware.AccessLogger(observer.LogWriter(gin.DefaultWriter), filteredAccessLog), gin.Recovery(), observer.Handler())
 	} else {
-		r = gin.Default()
+		r = gin.New()
+		r.Use(middleware.AccessLogger(gin.DefaultWriter, filteredAccessLog), gin.Recovery())
 	}
 
 	// HIGH-4: configure trusted proxies from config
