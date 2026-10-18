@@ -202,7 +202,9 @@ func ChangePassword(ctx context.Context, pool *sql.DB, cfg *config.Config, cache
 	}, nil
 }
 
-func DeactivateAccount(ctx context.Context, pool *sql.DB, cfg *config.Config, cacheClient *cache.Client, userID int64, currentToken, currentPassword, confirmation, twoFactorCode string) (map[string]interface{}, error) {
+// PrepareAccountDeactivation verifies credentials without revoking sessions.
+// Persistence and revocation must commit together in the caller's transaction.
+func PrepareAccountDeactivation(ctx context.Context, pool *sql.DB, cfg *config.Config, userID int64, currentPassword, confirmation, twoFactorCode string) (map[string]interface{}, error) {
 	if confirmation != "DEACTIVATE" {
 		return nil, fmt.Errorf("%w: deactivation confirmation does not match", ErrValidation)
 	}
@@ -229,9 +231,6 @@ func DeactivateAccount(ctx context.Context, pool *sql.DB, cfg *config.Config, ca
 		if !valid {
 			return nil, fmt.Errorf("%w: invalid two-factor code", ErrUnauthorized)
 		}
-	}
-	if err := RevokeAllSessions(ctx, pool, cacheClient, userID); err != nil {
-		return nil, err
 	}
 	return map[string]interface{}{
 		"verify_status":  "deactivated",

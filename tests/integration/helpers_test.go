@@ -108,9 +108,12 @@ func TestMain(m *testing.M) {
 	authRequired.PUT("/auth/registration/contact", handler.ChangeRegistrationContact(pool, nil, cfg, testCache))
 
 	moduleDB := rgdb.NewDB(pool)
-	generator := rg.NewGenerator(
+	moduleRoutes := r.Group("/")
+	var generator *rg.Generator
+	moduleRoutes.Use(func(c *gin.Context) { middleware.GeneratorContext(generator)(c) })
+	generator = rg.NewGenerator(
 		func(*rg.BaseModule) rgdb.DBExecutor { return moduleDB },
-		*r.Group("/"),
+		*moduleRoutes,
 		[]*rg.BaseModule{
 			authmodules.ContactVerificationsModule(pool, nil, testCache, cfg),
 			authmodules.AccountSecurityModule(pool, cfg),

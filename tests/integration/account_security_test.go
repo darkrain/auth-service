@@ -166,6 +166,106 @@ func TestAccountDeactivationRevokesAllSessions(t *testing.T) {
 	}
 }
 
+func TestAccountDeactivationConstraintDoesNotRevokeSessions(t *testing.T) {
+	truncateTables(t)
+	userID, token := verifiedAccount(t, "deactivation-blocked@example.com", "Password1")
+	// Simulate a domain-owned database constraint; auth does not query wallets.
+	_, err := testPool.Exec(`CREATE OR REPLACE FUNCTION test_block_deactivation() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN IF NEW.deactivated_at IS NOT NULL THEN RAISE EXCEPTION 'wallet.errors.pending_payout'; END IF; RETURN NEW; END $$`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = testPool.Exec(`CREATE TRIGGER test_block_deactivation BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION test_block_deactivation()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(`DROP TRIGGER test_block_deactivation ON users`)
+		_, _ = testPool.Exec(`DROP FUNCTION test_block_deactivation()`)
+	})
+	w := doRequest("POST", fmt.Sprintf("/auth/account_deactivation/id/%d?lang=ru", userID), map[string]string{"current_password": "Password1", "confirmation": "DEACTIVATE"}, token)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "дождитесь завершения") {
+		t.Fatalf("expected localized refusal: %d %s", w.Code, w.Body.String())
+	}
+	if w := doRequest("GET", "/auth/me", nil, token); w.Code != http.StatusOK {
+		t.Fatalf("failed deactivation revoked session: %d %s", w.Code, w.Body.String())
+	}
+	var blocked bool
+	if err = testPool.QueryRow(`SELECT blocked FROM sessions WHERE token=$1`, token).Scan(&blocked); err != nil || blocked {
+		t.Fatal("session changed despite rollback", err)
+	}
+}
+
+func TestAccountDeactivationRejectsInvalidCredentialsAndForeignAccount(t *testing.T) {
+	truncateTables(t)
+	userID, token := verifiedAccount(t, "deactivation-credentials@example.com", "Password1")
+	otherID, _ := verifiedAccount(t, "deactivation-other@example.com", "Password1")
+	for _, input := range []map[string]string{
+		{},
+		{"current_password": "wrong", "confirmation": "DEACTIVATE"},
+		{"current_password": "Password1", "confirmation": ""},
+		{"verify_status": "deactivated", "deactivated_at": "2026-09-09T00:00:00Z"},
+	} {
+		w := doRequest("POST", fmt.Sprintf("/auth/account_deactivation/id/%d?lang=ru", userID), input, token)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("invalid credentials accepted: %d %s", w.Code, w.Body.String())
+		}
+		if w := doRequest("GET", "/auth/me", nil, token); w.Code != http.StatusOK {
+			t.Fatalf("failed validation revoked session: %d %s", w.Code, w.Body.String())
+		}
+	}
+	w := doRequest("POST", fmt.Sprintf("/auth/account_deactivation/id/%d", otherID), map[string]string{"current_password": "Password1", "confirmation": "DEACTIVATE"}, token)
+	if w.Code == http.StatusOK {
+		t.Fatal("deactivated another account")
+	}
+	var count int
+	if err := testPool.QueryRow(`SELECT count(*) FROM users WHERE id IN ($1,$2) AND deactivated_at IS NOT NULL`, userID, otherID).Scan(&count); err != nil || count != 0 {
+		t.Fatal("invalid request changed an account", count, err)
+	}
+}
+
+func TestCachedSessionCannotBypassCommittedAccountState(t *testing.T) {
+	truncateTables(t)
+	userID, token := verifiedAccount(t, "cached-deactivation@example.com", "Password1")
+	if w := doRequest("GET", "/auth/me", nil, token); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	if _, err := testPool.Exec(`UPDATE users SET verify_status='deactivated',deactivated_at=now() WHERE id=$1`, userID); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately do not invalidate Redis: PostgreSQL is the authority.
+	if w := doRequest("GET", "/auth/me", nil, token); w.Code != http.StatusUnauthorized {
+		t.Fatalf("stale cache authenticated removed account: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAccountDeactivationRequiresTwoFactorWhenEnabled(t *testing.T) {
+	truncateTables(t)
+	userID, token := verifiedAccount(t, "deactivation-totp@example.com", "Password1")
+	secret := "JBSWY3DPEHPK3PXP"
+	code, err := totp.GenerateCode(secret, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := doRequest("POST", fmt.Sprintf("/auth/account_two_factor/id/%d", userID), map[string]interface{}{"two_factor_enabled": true, "two_factor_secret": secret, "two_factor_code": code}, token)
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	for _, invalid := range []string{"", "invalid"} {
+		w = doRequest("POST", fmt.Sprintf("/auth/account_deactivation/id/%d", userID), map[string]string{"current_password": "Password1", "confirmation": "DEACTIVATE", "two_factor_code": invalid}, token)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("missing/invalid TOTP accepted: %d %s", w.Code, w.Body.String())
+		}
+	}
+	code, err = totp.GenerateCode(secret, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = doRequest("POST", fmt.Sprintf("/auth/account_deactivation/id/%d", userID), map[string]string{"current_password": "Password1", "confirmation": "DEACTIVATE", "two_factor_code": code}, token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("valid TOTP rejected: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestAccountSessionsListAndRevoke(t *testing.T) {
 	truncateTables(t)
 	login := "security-sessions@example.com"

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -42,7 +43,7 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 
 		// 1. Check Redis cache
 		if cacheClient != nil {
-			if sd, err := cacheClient.GetSession(c.Request.Context(), token); err == nil && sd != nil {
+			if sd, err := cacheClient.GetSession(c.Request.Context(), token); err == nil && sd != nil && cachedSessionCurrent(c.Request.Context(), pool, token, sd) {
 				if sd.AuthType != "registration" && !activeVerifyStatus(sd.VerifyStatus) {
 					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account is not active", "code": codeUnauthorized})
 					return
@@ -62,6 +63,7 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 				c.Set("verify_status", sd.VerifyStatus)
 				c.Set("auth_type", sd.AuthType)
 				c.Set("token", token)
+				setAuthenticatedContext(c, int64(sd.UserID), sd.Role)
 				touchSession(c, pool, cacheClient, sd.SessionID, sd.AuthType)
 				c.Next()
 				return
@@ -149,10 +151,29 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 		c.Set("verify_status", verifyStatus)
 		c.Set("auth_type", authType)
 		c.Set("token", token)
+		setAuthenticatedContext(c, int64(userID), role)
 		touchSession(c, pool, cacheClient, sessionID, authType)
 
 		c.Next()
 	}
+}
+
+// Redis caches identity metadata, not revocation authority. A committed ban,
+// deactivation or session revocation must take effect even if invalidation is
+// delayed or races a cache fill. One indexed existence check also detects role
+// changes; a mismatch follows the normal database path with fresh metadata.
+func cachedSessionCurrent(ctx context.Context, pool *sql.DB, token string, sd *cache.SessionData) bool {
+	if pool == nil {
+		return false
+	}
+	var current bool
+	err := pool.QueryRowContext(ctx, `SELECT EXISTS(
+	 SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id
+	 WHERE s.id=$1 AND s.token=$2 AND s.user_id=$3 AND NOT s.blocked
+	 AND (s.expire_date IS NULL OR s.expire_date>now())
+	 AND u.role=$4 AND u.verify_status=$5 AND coalesce(s.auth_type,'')=$6
+	)`, sd.SessionID, token, sd.UserID, sd.Role, sd.VerifyStatus, sd.AuthType).Scan(&current)
+	return err == nil && current
 }
 
 func touchSession(c *gin.Context, pool *sql.DB, cacheClient *cache.Client, sessionID int64, authType string) {

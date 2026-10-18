@@ -1,21 +1,27 @@
 package modules
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/middleware"
 	"github.com/darkrain/auth-service/internal/service"
 	module "github.com/darkrain/request-generator"
 	"github.com/darkrain/request-generator/actions"
 	"github.com/darkrain/request-generator/fields"
+	"github.com/darkrain/request-generator/icontext"
 	"github.com/darkrain/request-generator/renderer"
 	"github.com/gin-gonic/gin"
 	pg "github.com/go-jet/jet/v2/postgres"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type accountSessionsTable struct {
@@ -100,19 +106,52 @@ func AccountSessionsModule(pool *sql.DB, cacheClient *cache.Client, cfg *config.
 	}
 }
 
-func AccountDeactivationModule(pool *sql.DB, cacheClient *cache.Client, cfg *config.Config) *module.BaseModule {
+func AccountDeactivationModule(pool *sql.DB, _ *cache.Client, cfg *config.Config) *module.BaseModule {
 	t := accountSecurityUsers()
+	// Command inputs, not persisted user columns. Only the atomic operation
+	// decides which actual columns can change.
+	password := pg.StringColumn("current_password")
+	confirmation := pg.StringColumn("confirmation")
+	twoFactorCode := pg.StringColumn("two_factor_code")
 	permissions := authenticatedRoles(cfg)
 	return &module.BaseModule{
 		Name: "account_deactivation", Label: "account_security.deactivate.label", Table: t, PrimaryKey: t.ID, Path: "/auth",
 		Fields: []fields.ModuleField{
+			{Column: password, Title: "account_security.password.current_password", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeHidden},
+			{Column: confirmation, Title: "account_security.deactivate.confirmation", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeHidden},
+			{Column: twoFactorCode, Title: "account_security.two_factor.code", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeHidden},
 			{Column: t.ID, Title: "account_security.fields.id", Type: fields.ModuleFieldTypeInt, FormType: fields.ModuleFieldFormTypeOnlyView},
 			{Column: t.VerifyStatus, Title: "account_security.fields.verify_status", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeHidden},
 			{Column: t.DeactivatedAt, Title: "account_security.deactivate.deactivated_at", Type: fields.ModuleFieldTypeString, FormType: fields.ModuleFieldFormTypeOnlyView},
 		},
 		Actions: []actions.ModuleAction{actions.UpdateModuleAction{
-			Label: "account_security.deactivate.action", Columns: []pg.Column{t.VerifyStatus, t.DeactivatedAt}, Permission: permissions, Auth: true, By: []pg.Column{t.ID}, Where: ownedUser(t), ViewAfterUpdate: boolRef(false),
-			BeforeAction: accountDeactivateBefore(pool, cacheClient, cfg),
+			Label: "account_security.deactivate.action", Columns: []pg.Column{password, confirmation, twoFactorCode}, Permission: permissions, Auth: true, By: []pg.Column{t.ID}, Where: ownedUser(t), ViewAfterUpdate: boolRef(false),
+			Mode: actions.UpdateModeAtomic,
+			Atomic: &actions.AtomicUpdateConfig{Operation: func(ctx context.Context, ex actions.AtomicExecutor, input actions.AtomicUpdateInput) (actions.AtomicRecord, error) {
+				actor, ok := icontext.GetUser(ctx)
+				if !ok || input.Selector.ByKey != "id" || input.Selector.Value.Int == nil || *input.Selector.Value.Int != actor.ID {
+					return actions.AtomicRecord{}, accountDeactivationError(ctx, nil)
+				}
+				currentPassword, _ := input.Input.String("current_password")
+				confirmed, _ := input.Input.String("confirmation")
+				code, _ := input.Input.String("two_factor_code")
+				if _, err := service.PrepareAccountDeactivation(ctx, pool, cfg, actor.ID, currentPassword, confirmed, code); err != nil {
+					return actions.AtomicRecord{}, fmt.Errorf("%s", middleware.TranslateContext(ctx, "account_security.deactivate.credentials_invalid", "Check your current password, confirmation and two-factor code."))
+				}
+				n, err := ex.Update(ctx, actions.AtomicUpdate{Table: t, Where: t.ID.EQ(pg.Int(actor.ID)), Fields: []actions.AtomicUpdateField{
+					{Column: t.VerifyStatus, Operation: actions.AtomicUpdateSet, Value: actions.AtomicString("deactivated")},
+					{Column: t.DeactivatedAt, Operation: actions.AtomicUpdateSet, Value: actions.AtomicTime(time.Now().UTC())},
+				}})
+				if err != nil || n != 1 {
+					return actions.AtomicRecord{}, accountDeactivationError(ctx, err)
+				}
+				s := accountSessions()
+				_, err = ex.Update(ctx, actions.AtomicUpdate{Table: s, Where: s.UserID.EQ(pg.Int(actor.ID)), Fields: []actions.AtomicUpdateField{{Column: s.Blocked, Operation: actions.AtomicUpdateSet, Value: actions.AtomicBool(true)}}})
+				if err != nil {
+					return actions.AtomicRecord{}, accountDeactivationError(ctx, err)
+				}
+				return actions.AtomicRecord{Value: actor.ID, PrimaryKey: "id"}, nil
+			}},
 		}},
 		RoleWhere: []actions.RoleWhere{{Role: actions.RoleAll, Where: ownedUser(t)}},
 	}
@@ -168,22 +207,17 @@ func accountTwoFactorBefore(pool *sql.DB, cacheClient *cache.Client, cfg *config
 	}
 }
 
-func accountDeactivateBefore(pool *sql.DB, cacheClient *cache.Client, cfg *config.Config) func(*gin.Context) error {
-	return func(c *gin.Context) error {
-		userID, ok := userID(c)
-		if !ok {
-			return accountActionError(c, "authentication is required", nil)
+func accountDeactivationError(ctx context.Context, err error) error {
+	translate := func(key, fallback string) string { return middleware.TranslateContext(ctx, key, fallback) }
+	var policy *pgconn.PgError
+	if errors.As(err, &policy) && policy.Code == "P0001" {
+		if message := translate(policy.Message, ""); message != "" && message != policy.Message {
+			return fmt.Errorf("%s", message)
 		}
-		input, err := body(c)
-		if err != nil {
-			return accountActionError(c, "invalid request body", nil)
-		}
-		output, err := service.DeactivateAccount(c.Request.Context(), pool, cfg, cacheClient, userID, contextToken(c), inputString(input, "current_password"), inputString(input, "confirmation"), inputString(input, "two_factor_code"))
-		if err != nil {
-			return accountActionError(c, err.Error(), map[string]string{accountSecurityErrorField(err, "confirmation"): err.Error()})
-		}
-		return replaceBody(c, output)
 	}
+	message := "The account could not be deactivated. No account changes were saved."
+	message = translate("account_security.deactivate.unavailable", message)
+	return fmt.Errorf("%s", message)
 }
 
 func accountSessionDeleteBefore(pool *sql.DB, cacheClient *cache.Client) func(*gin.Context) error {

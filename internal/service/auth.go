@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -21,6 +23,9 @@ import (
 
 // ErrValidation is returned when request data is invalid.
 var ErrValidation = errors.New("validation error")
+
+// Admission policy rejection is deliberately opaque: never expose DB details.
+var ErrRegistrationPolicy = errors.New("registration policy rejected")
 
 // ErrInvalidEmail is returned when the email format is invalid.
 var ErrInvalidEmail = errors.New("invalid email format")
@@ -198,6 +203,8 @@ func Logout(ctx context.Context, pool *sql.DB, cacheClient *cache.Client, token 
 
 // RegisterRequest holds the registration input.
 type RegisterRequest struct {
+	Invitation    string
+	IP            string
 	Login         string
 	Password      string
 	Role          string
@@ -223,6 +230,12 @@ func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 	}
 	if strings.TrimSpace(req.Password) == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrValidation)
+	}
+	if len(req.Invitation) > 256 || len(req.DeviceUID) > 512 || len(req.IP) > 64 {
+		return nil, ErrRegistrationPolicy
+	}
+	if cfg.RegistrationPolicyFunction != "" && (!regexp.MustCompile(`^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$`).MatchString(cfg.RegistrationPolicyFunction) || pool == nil) {
+		return nil, errors.New("registration policy configuration unavailable")
 	}
 
 	// 1b. Resolve role
@@ -293,15 +306,39 @@ func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 
 	// 6. Insert user
 	var userID int64
+	var registrationTx *sql.Tx
 	if pool != nil {
+		registrationTx, err = pool.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("db: begin registration: %w", err)
+		}
+		defer registrationTx.Rollback()
 		var insertQuery string
 		if isEmail {
 			insertQuery = `INSERT INTO users (email, password, role, verify_status) VALUES ($1, $2, $3, 'registered') RETURNING id`
 		} else {
 			insertQuery = `INSERT INTO users (phone, password, role, verify_status) VALUES ($1, $2, $3, 'registered') RETURNING id`
 		}
-		if err := pool.QueryRowContext(ctx, insertQuery, req.Login, string(hash), role).Scan(&userID); err != nil {
+		if err := registrationTx.QueryRowContext(ctx, insertQuery, req.Login, string(hash), role).Scan(&userID); err != nil {
 			return nil, fmt.Errorf("db: insert user: %w", err)
+		}
+		if cfg.RegistrationPolicyFunction != "" {
+			policyInput, _ := json.Marshal(struct {
+				UserID     int64  `json:"user_id"`
+				Role       string `json:"role"`
+				Invitation string `json:"invitation"`
+				DeviceUID  string `json:"device_uid"`
+				IP         string `json:"ip"`
+			}{userID, role, strings.TrimSpace(req.Invitation), req.DeviceUID, req.IP})
+			// Identifier is configuration-only and strictly validated above; all
+			// request values remain bound parameters, never SQL text.
+			if _, err = registrationTx.ExecContext(ctx, "SELECT "+cfg.RegistrationPolicyFunction+"($1::jsonb)", string(policyInput)); err != nil {
+				var policyErr interface{ SQLState() string }
+				if errors.As(err, &policyErr) && policyErr.SQLState() == "23514" {
+					return nil, ErrRegistrationPolicy
+				}
+				return nil, fmt.Errorf("db: registration admission unavailable: %w", err)
+			}
 		}
 	}
 
@@ -325,12 +362,15 @@ func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *con
 	expiresIn := ttlMin * 60
 
 	if pool != nil {
-		_, err := pool.ExecContext(ctx,
-			`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, blocked) VALUES ($1, $2, $3, 'registration', '127.0.0.1', false)`,
-			userID, registrationToken, expireDate,
+		_, err := registrationTx.ExecContext(ctx,
+			`INSERT INTO sessions (user_id, token, expire_date, auth_type, ip, device_uid, blocked) VALUES ($1, $2, $3, 'registration', $4, $5, false)`,
+			userID, registrationToken, expireDate, req.IP, req.DeviceUID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("db: insert registration session: %w", err)
+		}
+		if err = registrationTx.Commit(); err != nil {
+			return nil, fmt.Errorf("db: commit registration: %w", err)
 		}
 	}
 
