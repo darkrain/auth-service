@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/config"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -21,11 +22,11 @@ type Publisher interface {
 }
 
 type AMQPPublisher struct {
-	connection *amqp.Connection
+	connection broker.ChannelProvider
 	config     *config.Config
 }
 
-func NewPublisher(connection *amqp.Connection, cfg *config.Config) *AMQPPublisher {
+func NewPublisher(connection broker.ChannelProvider, cfg *config.Config) *AMQPPublisher {
 	return &AMQPPublisher{connection: connection, config: cfg}
 }
 
@@ -52,6 +53,9 @@ func (p *AMQPPublisher) PublishCode(ctx context.Context, request CodeRequest) er
 	}
 	channel, err := p.connection.Channel()
 	if err != nil {
+		if p.config.MessageBroker.PublishMode == PublishModeBestEffort {
+			return nil
+		}
 		return fmt.Errorf("delivery: open broker channel: %w", err)
 	}
 	defer channel.Close()

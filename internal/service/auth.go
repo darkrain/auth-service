@@ -11,11 +11,11 @@ import (
 	"unicode"
 
 	"database/sql"
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/validator"
-	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -216,7 +216,7 @@ type RegisterResult struct {
 
 // Register validates, hashes password, inserts user and publishes a verification event.
 // Returns a short-lived registration token the client can use to authenticate verify calls.
-func Register(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *config.Config, req RegisterRequest) (*RegisterResult, error) {
+func Register(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config, req RegisterRequest) (*RegisterResult, error) {
 	// 1. Basic field validation
 	if strings.TrimSpace(req.Login) == "" {
 		return nil, fmt.Errorf("%w: login (email or phone) is required", ErrValidation)
