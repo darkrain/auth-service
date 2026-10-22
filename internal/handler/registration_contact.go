@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type registrationContactRequest struct {
@@ -43,7 +43,7 @@ type registrationContactResponse struct {
 //	@Failure		401	{object}	errorResponse
 //	@Failure		403	{object}	errorResponse
 //	@Router			/auth/registration/contact [put]
-func ChangeRegistrationContact(pool *sql.DB, conn *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
+func ChangeRegistrationContact(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authType, _ := c.Get("auth_type")
 		if authType != "registration" {

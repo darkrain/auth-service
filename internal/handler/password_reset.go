@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"database/sql"
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type resetRequestBody struct {
@@ -37,7 +37,7 @@ type resetConfirmBody struct {
 //	@Failure		400		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/password/reset-request [post]
-func ResetRequest(pool *sql.DB, conn *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
+func ResetRequest(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req resetRequestBody
 		if err := c.ShouldBindJSON(&req); err != nil {

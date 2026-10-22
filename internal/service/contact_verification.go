@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/validator"
-	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -176,7 +176,7 @@ func contactVerificationRetryAfter(ctx context.Context, pool *sql.DB, cfg *confi
 	return int(math.Ceil(remaining.Seconds())), nil
 }
 
-func PublishContactVerification(ctx context.Context, conn *amqp.Connection, cfg *config.Config, verification *PreparedContactVerification) error {
+func PublishContactVerification(ctx context.Context, conn broker.ChannelProvider, cfg *config.Config, verification *PreparedContactVerification) error {
 	if verification == nil {
 		return fmt.Errorf("%w: verification is required", ErrValidation)
 	}
@@ -201,7 +201,7 @@ func PublishContactVerification(ctx context.Context, conn *amqp.Connection, cfg 
 	})
 }
 
-func CreateContactVerification(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *config.Config, request ContactVerificationRequest) (int64, error) {
+func CreateContactVerification(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config, request ContactVerificationRequest) (int64, error) {
 	prepared, err := PrepareContactVerification(ctx, pool, cfg, request)
 	if err != nil {
 		return 0, err
@@ -229,7 +229,7 @@ func CreateContactVerification(ctx context.Context, pool *sql.DB, conn *amqp.Con
 // The registration session remains valid and continues to belong to the same
 // user. Updating the login immediately releases the mistyped contact instead of
 // keeping it occupied until confirmation.
-func ChangeRegistrationContact(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *config.Config, request ContactVerificationRequest) (*RegistrationContactChangeResult, error) {
+func ChangeRegistrationContact(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config, request ContactVerificationRequest) (*RegistrationContactChangeResult, error) {
 	request.Purpose = delivery.PurposeRegistrationVerification
 	prepared, err := PrepareContactVerification(ctx, pool, cfg, request)
 	if err != nil {

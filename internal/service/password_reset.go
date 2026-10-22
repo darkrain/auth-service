@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"database/sql"
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/delivery"
-	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -54,7 +54,7 @@ const authTypePasswordReset = "password_reset"
 func RequestPasswordReset(
 	ctx context.Context,
 	pool *sql.DB,
-	conn *amqp.Connection,
+	conn broker.ChannelProvider,
 	cfg *config.Config,
 	cacheClient *cache.Client,
 	login, deviceUID, ip string,

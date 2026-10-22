@@ -33,7 +33,8 @@ type LoginChallenge struct {
 
 // Client wraps a redis.Client with session-specific helpers.
 type Client struct {
-	rdb *redis.Client
+	rdb  *redis.Client
+	seen sessionSeenWindow
 }
 
 // NewClient creates a Redis client from config.
@@ -156,7 +157,26 @@ func (c *Client) MarkSessionSeen(ctx context.Context, sessionID int64, interval 
 	if sessionID <= 0 {
 		return false, nil
 	}
-	return c.rdb.SetNX(ctx, sessionSeenKey(sessionID), "1", interval).Result()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	started := time.Now()
+	if c.seen.contains(sessionID, started) {
+		return false, nil
+	}
+	key := sessionSeenKey(sessionID)
+	update, err := c.rdb.SetNX(ctx, key, "1", interval).Result()
+	if err != nil {
+		return false, err
+	}
+	// Redis still coordinates writers across instances. Use its remaining TTL,
+	// including on an NX miss; starting a fresh local interval there could delay
+	// last_seen by another five minutes. Measuring from before the round trips
+	// makes our deadline conservative. A failed TTL read only skips this shortcut.
+	if remaining, err := c.rdb.PTTL(ctx, key).Result(); err == nil && remaining > 0 {
+		c.seen.remember(sessionID, started.Add(remaining), time.Now())
+	}
+	return update, nil
 }
 
 // luaIncrExpire atomically increments a key and sets its TTL on first increment.

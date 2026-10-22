@@ -36,6 +36,7 @@ import (
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/db"
+	"github.com/darkrain/auth-service/internal/diagnostics"
 	"github.com/darkrain/auth-service/internal/handler"
 	"github.com/darkrain/auth-service/internal/middleware"
 	authmodules "github.com/darkrain/auth-service/internal/modules"
@@ -44,7 +45,6 @@ import (
 	rgdb "github.com/darkrain/request-generator/db"
 	"github.com/darkrain/request-generator/locale"
 	"github.com/gin-gonic/gin"
-	amqp "github.com/rabbitmq/amqp091-go"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -112,19 +112,34 @@ func main() {
 	}
 
 	// RabbitMQ is not needed in explicitly isolated test mode.
-	var rmqConn *amqp.Connection
+	var rmqConn broker.ChannelProvider
 	if cfg.MessageBroker.PublishMode != "disabled" {
-		rmqConn, err = broker.Connect(cfg)
+		managedBroker := broker.NewReconnecting(cfg)
+		rmqConn = managedBroker
+		defer managedBroker.Close()
+		err = managedBroker.Connect()
 		if err != nil {
 			log.Printf("WARNING: RabbitMQ not available: %v", err)
 		} else {
-			defer rmqConn.Close()
 			log.Println("RabbitMQ connected")
 		}
 	}
 
 	// HTTP server
-	r := gin.Default()
+	var r *gin.Engine
+	filteredAccessLog := os.Getenv("IAMFREE_HTTP_ACCESS_LOG") == "filtered"
+	if os.Getenv("IAMFREE_AUTH_DIAGNOSTICS") == "1" {
+		observer, closeDiagnostics, err := diagnostics.Start()
+		if err != nil {
+			log.Fatalf("Auth diagnostics: %v", err)
+		}
+		defer closeDiagnostics()
+		r = gin.New()
+		r.Use(middleware.AccessLogger(observer.LogWriter(gin.DefaultWriter), filteredAccessLog), gin.Recovery(), observer.Handler())
+	} else {
+		r = gin.New()
+		r.Use(middleware.AccessLogger(gin.DefaultWriter, filteredAccessLog), gin.Recovery())
+	}
 
 	// HIGH-4: configure trusted proxies from config
 	if len(cfg.TrustedProxies) > 0 {
