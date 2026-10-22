@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/gin-gonic/gin"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -21,7 +22,7 @@ const codeTooManyRequests = "ERR_TOO_MANY_REQUESTS"
 // endpoint: path string used as part of Redis key (e.g. "/auth/login")
 // ipMax, ipWindowSec: IP-based limits (0 = skip IP check)
 // deviceMax, deviceWindowSec: device-based limits (0 = skip device check)
-func RateLimit(cacheClient *cache.Client, conn *amqp.Connection, endpoint string,
+func RateLimit(cacheClient *cache.Client, conn broker.ChannelProvider, endpoint string,
 	ipMax, ipWindowSec, deviceMax, deviceWindowSec int) gin.HandlerFunc {
 
 	return func(c *gin.Context) {
@@ -86,7 +87,7 @@ func RateLimit(cacheClient *cache.Client, conn *amqp.Connection, endpoint string
 
 // publishSecurityEvent publishes a security event to RabbitMQ asynchronously.
 // Does not block the main request.
-func publishSecurityEvent(conn *amqp.Connection, eventType string, payload map[string]interface{}) {
+func publishSecurityEvent(conn broker.ChannelProvider, eventType string, payload map[string]interface{}) {
 	if conn == nil {
 		return
 	}

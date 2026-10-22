@@ -45,7 +45,6 @@ import (
 	rgdb "github.com/darkrain/request-generator/db"
 	"github.com/darkrain/request-generator/locale"
 	"github.com/gin-gonic/gin"
-	amqp "github.com/rabbitmq/amqp091-go"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -113,13 +112,15 @@ func main() {
 	}
 
 	// RabbitMQ is not needed in explicitly isolated test mode.
-	var rmqConn *amqp.Connection
+	var rmqConn broker.ChannelProvider
 	if cfg.MessageBroker.PublishMode != "disabled" {
-		rmqConn, err = broker.Connect(cfg)
+		managedBroker := broker.NewReconnecting(cfg)
+		rmqConn = managedBroker
+		defer managedBroker.Close()
+		err = managedBroker.Connect()
 		if err != nil {
 			log.Printf("WARNING: RabbitMQ not available: %v", err)
 		} else {
-			defer rmqConn.Close()
 			log.Println("RabbitMQ connected")
 		}
 	}

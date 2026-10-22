@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/validator"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // ErrTooManyRequests is returned when the rate limit is exceeded.
@@ -28,7 +28,7 @@ var ErrForbiddenRecipient = errors.New("recipient does not belong to authenticat
 // SendCode generates a 6-digit verification code and publishes it to RabbitMQ.
 // Rate-limited: if an existing code's TTL hasn't expired, returns ErrTooManyRequests.
 // userID is the authenticated user's ID; recipient must match their email or phone.
-func SendCode(ctx context.Context, pool *sql.DB, conn *amqp.Connection, cfg *config.Config, recipient, deviceUID, provider string, allowFallback bool, userID int64) error {
+func SendCode(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config, recipient, deviceUID, provider string, allowFallback bool, userID int64) error {
 	recipient = strings.TrimSpace(recipient)
 	if recipient == "" {
 		return fmt.Errorf("%w: recipient is required", ErrValidation)

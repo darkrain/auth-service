@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/delivery"
@@ -22,7 +23,6 @@ import (
 	"github.com/darkrain/request-generator/renderer"
 	"github.com/gin-gonic/gin"
 	pg "github.com/go-jet/jet/v2/postgres"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type contactVerificationsTable struct {
@@ -51,7 +51,7 @@ func contactTable() contactVerificationsTable {
 // ContactVerificationsModule exposes the standard generator CRUD contract.
 // The browser can only request a code and submit a code; recipient ownership,
 // code generation and contact updates stay on the server.
-func ContactVerificationsModule(pool *sql.DB, conn *amqp.Connection, cacheClient *cache.Client, cfg *config.Config) *module.BaseModule {
+func ContactVerificationsModule(pool *sql.DB, conn broker.ChannelProvider, cacheClient *cache.Client, cfg *config.Config) *module.BaseModule {
 	t := contactTable()
 	permissions := authenticatedRoles(cfg)
 	read := []pg.Column{t.ID, t.CreationDate, t.UpdateDate, t.ContactType, t.Recipient, t.Provider, t.AllowFallback, t.Purpose, t.Status, t.Counter, t.SentTS, t.ExpiresAt, t.ConfirmedAt}
@@ -111,7 +111,7 @@ func owned(t contactVerificationsTable) func(*gin.Context) pg.BoolExpression {
 	}
 }
 
-func requestContactVerification(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) func(*gin.Context) error {
+func requestContactVerification(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config) func(*gin.Context) error {
 	return func(c *gin.Context) error {
 		userID, ok := userID(c)
 		if !ok {

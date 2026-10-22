@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"database/sql"
+	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type loginRequest struct {
@@ -74,7 +74,7 @@ type errorResponse struct {
 //	@Failure		429		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/login [post]
-func Login(pool *sql.DB, _ *amqp.Connection, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
+func Login(pool *sql.DB, _ broker.ChannelProvider, cfg *config.Config, cacheClient *cache.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req loginRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -225,7 +225,7 @@ func Me() gin.HandlerFunc {
 //	@Failure		400		{object}	errorResponse
 //	@Failure		500		{object}	errorResponse
 //	@Router			/auth/register [post]
-func Register(pool *sql.DB, conn *amqp.Connection, cfg *config.Config) gin.HandlerFunc {
+func Register(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req registerRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
