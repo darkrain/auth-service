@@ -224,7 +224,7 @@ func main() {
 
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")
-	authRequired.Use(middleware.Auth(pgPool, cacheClient))
+	authRequired.Use(middleware.Auth(pgPool, cacheClient, cfg.AllowedLoginRoles))
 	authRequired.PUT("/auth/registration/contact", handler.ChangeRegistrationContact(pgPool, rmqConn, cfg, cacheClient))
 
 	// API key management (admin and system only)
@@ -254,7 +254,9 @@ func main() {
 				}
 				return middleware.RequireRole(allowed...)
 			},
-			func(actions.ModuleAction) gin.HandlerFunc { return middleware.Auth(pgPool, cacheClient) },
+			func(actions.ModuleAction) gin.HandlerFunc {
+				return middleware.Auth(pgPool, cacheClient, cfg.AllowedLoginRoles)
+			},
 		)
 		generator.Locales = []locale.Lang{locale.RU, locale.EN}
 		generator.DefaultLocale = locale.EN
