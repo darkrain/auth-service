@@ -109,6 +109,9 @@ func RequestPasswordReset(
 	if verifyStatus != "verified" {
 		return nil
 	}
+	if err := checkLoginRole(ctx, pool, cfg, userID); err != nil {
+		return nil
+	}
 
 	// Check if this is a test account
 	testCode := ""
@@ -191,6 +194,10 @@ func ConfirmPasswordReset(
 	}
 	if err := pool.QueryRowContext(ctx, findQuery, login).Scan(&userID); err != nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+
+	if err := checkLoginRole(ctx, pool, cfg, userID); err != nil {
+		return err
 	}
 
 	// Find reset code

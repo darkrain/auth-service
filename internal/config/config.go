@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 type RateLimitIP struct {
@@ -113,6 +114,8 @@ type Config struct {
 	SwaggerEnabled                bool                `json:"SwaggerEnabled"`
 	TestAccounts                  []TestAccount       `json:"TestAccounts"`
 	AllowedRoles                  []string            `json:"AllowedRoles"`
+	AllowedLoginRoles             []string            `json:"AllowedLoginRoles"`
+	RegistrationBrand             string              `json:"RegistrationBrand"`
 }
 
 func Load(path string) (*Config, error) {
@@ -187,6 +190,14 @@ func (c *Config) setMessageDefaults() {
 
 // Validate checks that critical config fields are present.
 func (c *Config) Validate() error {
+	if c.RegistrationBrand != "" && c.RegistrationBrand != "iamfree" && c.RegistrationBrand != "topmember" {
+		return fmt.Errorf("config: unknown RegistrationBrand")
+	}
+	for _, role := range c.AllowedLoginRoles {
+		if strings.TrimSpace(role) == "" {
+			return fmt.Errorf("config: invalid AllowedLoginRoles entry")
+		}
+	}
 	if c.PasswordSalt == "" {
 		return errors.New("config: PasswordSalt must not be empty")
 	}

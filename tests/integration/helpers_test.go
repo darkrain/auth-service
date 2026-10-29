@@ -47,7 +47,10 @@ func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
 
 	// Load config from auth-service.test.json
-	cfgPath := filepath.Join(repoRoot(), "auth-service.test.json")
+	cfgPath := os.Getenv("AUTH_TEST_CONFIG")
+	if cfgPath == "" {
+		cfgPath = filepath.Join(repoRoot(), "auth-service.test.json")
+	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		panic(fmt.Sprintf("failed to load test config: %v", err))
