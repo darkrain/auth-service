@@ -20,7 +20,18 @@ const (
 // Auth middleware validates Bearer token or X-API-Key header.
 // It checks the Redis cache first; on cache miss it queries the sessions table,
 // then caches the result with TTL = expire_date - now.
-func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
+func Auth(pool *sql.DB, cacheClient *cache.Client, loginPolicies ...[]string) gin.HandlerFunc {
+	allowed := func(role string) bool {
+		if len(loginPolicies) == 0 || len(loginPolicies[0]) == 0 {
+			return true
+		}
+		for _, value := range loginPolicies[0] {
+			if role == value {
+				return true
+			}
+		}
+		return false
+	}
 	return func(c *gin.Context) {
 		var token string
 
@@ -43,6 +54,10 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 		// 1. Check Redis cache
 		if cacheClient != nil {
 			if sd, err := cacheClient.GetSession(c.Request.Context(), token); err == nil && sd != nil {
+				if !allowed(sd.Role) {
+					c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "account is not available on this domain", "code": codeForbidden})
+					return
+				}
 				if sd.AuthType != "registration" && !activeVerifyStatus(sd.VerifyStatus) {
 					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account is not active", "code": codeUnauthorized})
 					return
@@ -94,6 +109,10 @@ func Auth(pool *sql.DB, cacheClient *cache.Client) gin.HandlerFunc {
 
 		if blocked {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token has been revoked", "code": codeUnauthorized})
+			return
+		}
+		if !allowed(role) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "account is not available on this domain", "code": codeForbidden})
 			return
 		}
 

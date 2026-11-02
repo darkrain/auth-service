@@ -36,3 +36,18 @@ func TestPublisherDisabledDoesNotRequireBroker(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCodeEventsCarryOperatorBrand(t *testing.T) {
+	for _, brand := range []string{"iamfree", "topmember"} {
+		cfg := &config.Config{RegistrationBrand: brand, CodeDelivery: config.CodeDeliveryConfig{Email: config.CodeDeliveryEmailConfig{DefaultProvider: "email", AllowedProviders: []string{"email"}}}}
+		for _, purpose := range []string{PurposeRegistrationVerification, PurposeVerification, PurposePasswordReset} {
+			event, err := NewCodeEvent(cfg, CodeRequest{RecipientType: RecipientTypeEmail, Purpose: purpose, Recipient: "fixture@example.invalid"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if event.Metadata["brand"] != brand {
+				t.Fatalf("wrong brand for %s", purpose)
+			}
+		}
+	}
+}

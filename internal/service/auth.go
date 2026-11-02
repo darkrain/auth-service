@@ -134,6 +134,9 @@ func Login(ctx context.Context, pool *sql.DB, cfg *config.Config, cacheClient *c
 	}
 
 	if twoFactorEnabled {
+		if err := checkLoginRole(ctx, pool, cfg, userID); err != nil {
+			return nil, err
+		}
 		challenge, err := StartLoginChallenge(ctx, cacheClient, userID, strings.TrimSpace(deviceUID), ip)
 		if err != nil {
 			return nil, err
@@ -146,6 +149,9 @@ func Login(ctx context.Context, pool *sql.DB, cfg *config.Config, cacheClient *c
 
 // createSession generates a token, inserts a session, and returns LoginResult.
 func createSession(ctx context.Context, pool *sql.DB, cfg *config.Config, userID int64, deviceUID, ip string) (*LoginResult, error) {
+	if err := checkLoginRole(ctx, pool, cfg, userID); err != nil {
+		return nil, err
+	}
 	// Generate token
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
@@ -300,7 +306,13 @@ func Register(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cf
 		} else {
 			insertQuery = `INSERT INTO users (phone, password, role, verify_status) VALUES ($1, $2, $3, 'registered') RETURNING id`
 		}
-		if err := pool.QueryRowContext(ctx, insertQuery, req.Login, string(hash), role).Scan(&userID); err != nil {
+		args := []any{req.Login, string(hash), role}
+		if cfg.RegistrationBrand != "" {
+			insertQuery = strings.Replace(insertQuery, "role, verify_status)", "role, verify_status, registration_brand)", 1)
+			insertQuery = strings.Replace(insertQuery, "'registered')", "'registered', $4)", 1)
+			args = append(args, cfg.RegistrationBrand)
+		}
+		if err := pool.QueryRowContext(ctx, insertQuery, args...).Scan(&userID); err != nil {
 			return nil, fmt.Errorf("db: insert user: %w", err)
 		}
 	}

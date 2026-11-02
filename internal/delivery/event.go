@@ -83,7 +83,7 @@ func NewCodeEvent(cfg *config.Config, req CodeRequest) (*RequestEvent, error) {
 		Variables: map[string]string{"code": req.Code, "ttl_sec": fmt.Sprintf("%d", req.TTLSec)},
 		UserID:    req.UserID, CreatedAt: time.Now().UTC(),
 		Delivery: DeliveryPolicy{SelectedProvider: req.SelectedProvider, ProviderChain: cfg.CodeProviderChain(req.RecipientType), AllowFallback: allowFallback},
-		Metadata: map[string]string{"device_uid": req.DeviceUID},
+		Metadata: map[string]string{"device_uid": req.DeviceUID, "brand": cfg.RegistrationBrand},
 	}, nil
 }
 
