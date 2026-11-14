@@ -234,6 +234,12 @@ func main() {
 	apiKeys.GET("", handler.ListAPIKeys(pgPool))
 	apiKeys.DELETE("/:id", handler.RevokeAPIKey(pgPool, cacheClient))
 
+	// Blocking customer accounts (admin and sudo only). The API checks its own
+	// permissions before it forwards here; this service checks the role again.
+	adminUsers := authRequired.Group("/admin/users")
+	adminUsers.Use(middleware.RequireRole("admin", "sudo"))
+	adminUsers.POST("/:id/block", handler.BlockUser(pgPool, cacheClient))
+
 	if pgPool != nil {
 		moduleDB := rgdb.NewDB(pgPool)
 		generator := rg.NewGenerator(

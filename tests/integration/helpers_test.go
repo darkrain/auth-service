@@ -148,6 +148,10 @@ func TestMain(m *testing.M) {
 	apiKeys.GET("", handler.ListAPIKeys(pool))
 	apiKeys.DELETE("/:id", handler.RevokeAPIKey(pool, testCache))
 
+	adminUsers := authRequired.Group("/admin/users")
+	adminUsers.Use(middleware.RequireRole("admin", "sudo"))
+	adminUsers.POST("/:id/block", handler.BlockUser(pool, testCache))
+
 	// Authenticated user info
 	authRequired.GET("/auth/me", handler.Me())
 
@@ -163,6 +167,7 @@ func truncateTables(t *testing.T) {
 
 	// Execute each statement separately — pgx doesn't support multi-statement in one Exec
 	statements := []string{
+		`DELETE FROM change_logs`,
 		`DELETE FROM contact_verifications`,
 		`DELETE FROM confirm_codes`,
 		`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE role != 'system')`,
