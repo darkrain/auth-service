@@ -38,6 +38,7 @@ A lightweight authentication and authorization microservice built with Go and Gi
 | POST | `/auth/api-keys` | Bearer + admin/system | Create API key |
 | GET | `/auth/api-keys` | Bearer + admin/system | List API keys |
 | DELETE | `/auth/api-keys/:id` | Bearer + admin/system | Revoke API key |
+| POST | `/admin/users/:id/block` | Bearer + admin/sudo | Block (`{"block":true}`: status `banned`, all sessions and API keys revoked) or unblock (`{"block":false}`: status before the latest admin block restored) a customer account; audited in `change_logs` |
 | GET | `/swagger/*` | — | Swagger UI |
 
 ## Getting Started

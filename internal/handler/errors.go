@@ -31,6 +31,7 @@ const (
 	CodeCodeExpired          = "ERR_CODE_EXPIRED"
 	CodeWeakPassword         = "ERR_WEAK_PASSWORD"
 	CodeVerificationCooldown = "ERR_VERIFICATION_COOLDOWN"
+	CodeConflict             = "ERR_CONFLICT"
 )
 
 // errResp returns a gin.H with error message and code
