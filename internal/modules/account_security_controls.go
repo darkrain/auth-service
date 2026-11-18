@@ -162,7 +162,8 @@ func accountTwoFactorBefore(pool *sql.DB, cacheClient *cache.Client, cfg *config
 		}
 		output, err := service.ConfigureTwoFactor(c.Request.Context(), pool, cfg, cacheClient, userID, contextToken(c), enabled, inputString(input, "two_factor_secret"), inputString(input, "two_factor_code"))
 		if err != nil {
-			return accountActionError(c, err.Error(), map[string]string{accountSecurityErrorField(err, "two_factor_code"): err.Error()})
+			message := localizedSecurityError(c, err)
+			return accountActionError(c, message, map[string]string{accountSecurityErrorField(err, "two_factor_code"): message})
 		}
 		return replaceBody(c, output)
 	}
@@ -214,6 +215,24 @@ func accountActionError(c *gin.Context, message string, fieldErrors map[string]s
 	}
 	c.JSON(http.StatusBadRequest, payload)
 	return fmt.Errorf("%s", message)
+}
+
+// localizedSecurityError turns the step-up and two-factor refusals a person
+// can fix into a sentence in their language; other errors keep their text.
+func localizedSecurityError(c *gin.Context, err error) string {
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "already enabled"):
+		return module.Translate(c, "account_security.errors.two_factor_enabled", "Two-factor authentication is already on. Turn off the current authenticator first, then connect a new one.")
+	case strings.Contains(message, "current password is invalid"):
+		return module.Translate(c, "account_security.errors.current_password", "The current password is incorrect.")
+	case strings.Contains(message, "two-factor code is required"):
+		return module.Translate(c, "account_security.errors.two_factor_required", "Enter the code from your authenticator app.")
+	case strings.Contains(message, "invalid two-factor code"):
+		return module.Translate(c, "account_security.errors.two_factor_invalid", "The authenticator code is incorrect.")
+	default:
+		return err.Error()
+	}
 }
 
 func accountSecurityErrorField(err error, fallback string) string {

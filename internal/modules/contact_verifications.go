@@ -148,7 +148,8 @@ func requestContactVerification(pool *sql.DB, conn broker.ChannelProvider, cache
 			// session: the current password, and the authenticator code when
 			// two-factor authentication is on.
 			if err := service.VerifyStepUp(c.Request.Context(), pool, cfg, userID, inputString(input, "current_password"), inputString(input, "two_factor_code")); err != nil {
-				return accountActionError(c, err.Error(), map[string]string{accountSecurityErrorField(err, "current_password"): err.Error()})
+				message := localizedSecurityError(c, err)
+				return accountActionError(c, message, map[string]string{accountSecurityErrorField(err, "current_password"): message})
 			}
 		}
 		prepared, err := service.PrepareContactVerification(c.Request.Context(), pool, cfg, request)

@@ -142,6 +142,10 @@ func TestSEC05ContactChangeRequiresStepUpAndRevokesSessions(t *testing.T) {
 			t.Fatalf("%s: error must point at current_password: %s", name, w.Body.String())
 		}
 	}
+	localized := doRequest("PUT", "/auth/contact_verifications?lang=ru", request(map[string]interface{}{"current_password": "WrongPassword9"}), token)
+	if errs, _ := parseJSON(localized)["errors"].(map[string]interface{}); errs["current_password"] != "Неверный текущий пароль." {
+		t.Fatalf("the refusal must be readable in the person's language: %s", localized.Body.String())
+	}
 	var pending int
 	if err := testPool.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM contact_verifications WHERE user_id=$1 AND purpose='verification'`, userID).Scan(&pending); err != nil {
 		t.Fatal(err)
