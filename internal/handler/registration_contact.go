@@ -79,6 +79,8 @@ func ChangeRegistrationContact(pool *sql.DB, conn broker.ChannelProvider, cfg *c
 				c.JSON(http.StatusBadRequest, errResp(CodeInvalidPhone, "Invalid phone format. Use international format: +79991234567"))
 			case errors.Is(err, service.ErrAlreadyExists):
 				c.JSON(http.StatusConflict, errResp(CodeLoginExists, "Login already registered"))
+			case errors.As(err, new(*service.RecipientLimitError)):
+				c.JSON(http.StatusTooManyRequests, errResp(CodeTooManyRequests, "Verification codes were already sent to too many different contacts today"))
 			case errors.Is(err, service.ErrTooManyRequests):
 				c.JSON(http.StatusTooManyRequests, errResp(CodeVerificationCooldown, "A verification code was sent recently"))
 			case errors.Is(err, service.ErrForbidden):

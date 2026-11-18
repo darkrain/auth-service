@@ -87,6 +87,7 @@ func TestAccountTwoFactorLoginChallenge(t *testing.T) {
 		"two_factor_enabled": true,
 		"two_factor_secret":  secret,
 		"two_factor_code":    code,
+		"current_password":   password,
 	}, token)
 	if enable.Code != http.StatusOK {
 		t.Fatalf("enable two factor: expected 200, got %d: %s", enable.Code, enable.Body.String())

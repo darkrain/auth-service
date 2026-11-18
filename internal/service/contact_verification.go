@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,56 @@ func ResendRetryAfter(err error) int {
 		return cooldown.RetryAfterSec
 	}
 	return 0
+}
+
+// RecipientLimitError reports that the account has already asked for codes to
+// too many different addresses during the last day. Each code is an e-mail or
+// a paid phone message to an address the caller chooses, so one cheap account
+// must not be able to send them to arbitrary recipients.
+type RecipientLimitError struct {
+	Limit int
+}
+
+func (e *RecipientLimitError) Error() string {
+	return fmt.Sprintf("%s: verification codes were sent to %d different contacts today", ErrTooManyRequests, e.Limit)
+}
+
+func (e *RecipientLimitError) Unwrap() error { return ErrTooManyRequests }
+
+// StatusCode makes the generator answer 429 instead of its 400 fallback.
+func (e *RecipientLimitError) StatusCode() int { return 429 }
+
+// ContactRecipientsPerDaySetting is the «Системные настройки» key with the
+// number of different contacts one account may receive codes for in 24 hours.
+const (
+	ContactRecipientsPerDaySetting = "auth.contact_recipients_per_day"
+	DefaultContactRecipientsPerDay = 5
+)
+
+// ContactRecipientsPerDay reads the limit from the shared settings table. A
+// missing row or table keeps the default; 0 switches the limit off.
+func ContactRecipientsPerDay(ctx context.Context, pool *sql.DB) int {
+	if pool == nil {
+		return DefaultContactRecipientsPerDay
+	}
+	var raw string
+	if err := pool.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, ContactRecipientsPerDaySetting).Scan(&raw); err != nil {
+		return DefaultContactRecipientsPerDay
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return DefaultContactRecipientsPerDay
+	}
+	return value
+}
+
+// ContactChange describes a contact that ConfirmContactVerification wrote to
+// the account, so the caller can end other sessions and warn the old contact.
+type ContactChange struct {
+	ContactType       string
+	Recipient         string
+	PreviousRecipient string
+	Purpose           string
 }
 
 // ContactVerificationRequest describes a code delivery request. It is shared
@@ -124,6 +175,9 @@ func PrepareContactVerification(ctx context.Context, pool *sql.DB, cfg *config.C
 	} else if retryAfter > 0 {
 		return nil, &ResendCooldownError{RetryAfterSec: retryAfter}
 	}
+	if err := checkContactRecipientLimit(ctx, pool, request); err != nil {
+		return nil, err
+	}
 
 	code := testVerificationCode(cfg, request.Recipient)
 	if code == "" {
@@ -174,6 +228,28 @@ func contactVerificationRetryAfter(ctx context.Context, pool *sql.DB, cfg *confi
 		return 0, nil
 	}
 	return int(math.Ceil(remaining.Seconds())), nil
+}
+
+func checkContactRecipientLimit(ctx context.Context, pool *sql.DB, request ContactVerificationRequest) error {
+	if pool == nil {
+		return nil
+	}
+	limit := ContactRecipientsPerDay(ctx, pool)
+	if limit <= 0 {
+		return nil
+	}
+	var used int
+	if err := pool.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT LOWER(recipient))
+		FROM contact_verifications
+		WHERE user_id=$1 AND sent_ts > NOW() - INTERVAL '24 hours' AND LOWER(recipient) <> LOWER($2)`,
+		request.UserID, request.Recipient).Scan(&used); err != nil {
+		return fmt.Errorf("count verification recipients: %w", err)
+	}
+	if used >= limit {
+		return &RecipientLimitError{Limit: limit}
+	}
+	return nil
 }
 
 func PublishContactVerification(ctx context.Context, conn broker.ChannelProvider, cfg *config.Config, verification *PreparedContactVerification) error {
@@ -306,62 +382,91 @@ func ChangeRegistrationContact(ctx context.Context, pool *sql.DB, conn broker.Ch
 }
 
 // ConfirmContactVerification verifies a one-time code and applies the contact
-// to the account in the same database transaction.
-func ConfirmContactVerification(ctx context.Context, pool *sql.DB, cfg *config.Config, userID, verificationID int64, code string) error {
+// to the account in the same database transaction. A wrong code, an expired
+// code and an exhausted attempt limit are committed before the error is
+// returned: rolling them back left the counter at zero, so the limit never
+// applied and a code could be guessed for its whole lifetime.
+func ConfirmContactVerification(ctx context.Context, pool *sql.DB, cfg *config.Config, userID, verificationID int64, code string) (*ContactChange, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
-		return fmt.Errorf("%w: verification code is required", ErrValidation)
+		return nil, fmt.Errorf("%w: verification code is required", ErrValidation)
 	}
 	tx, err := pool.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin contact verification: %w", err)
+		return nil, fmt.Errorf("begin contact verification: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var contactType, recipient, codeHash, status string
+	// failWith persists the state change of a rejected attempt and returns
+	// the rejection.
+	failWith := func(rejection error, statement string, args ...interface{}) (*ContactChange, error) {
+		if _, err := tx.ExecContext(ctx, statement, args...); err != nil {
+			return nil, fmt.Errorf("record verification attempt: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("record verification attempt: %w", err)
+		}
+		return nil, rejection
+	}
+
+	var contactType, recipient, codeHash, status, purpose string
 	var counter int
 	var expiresAt time.Time
 	err = tx.QueryRowContext(ctx, `
-		SELECT contact_type, recipient, code_hash, status, counter, expires_at
+		SELECT contact_type, recipient, code_hash, status, counter, expires_at, COALESCE(purpose, '')
 		FROM contact_verifications WHERE id=$1 AND user_id=$2 FOR UPDATE`, verificationID, userID,
-	).Scan(&contactType, &recipient, &codeHash, &status, &counter, &expiresAt)
-	if err == sql.ErrNoRows || status != "pending" {
-		return fmt.Errorf("%w: verification request not found", ErrNotFound)
+	).Scan(&contactType, &recipient, &codeHash, &status, &counter, &expiresAt, &purpose)
+	if err == sql.ErrNoRows || (err == nil && status != "pending") {
+		return nil, fmt.Errorf("%w: verification request not found", ErrNotFound)
 	}
 	if err != nil {
-		return fmt.Errorf("load contact verification: %w", err)
+		return nil, fmt.Errorf("load contact verification: %w", err)
 	}
 	if time.Now().UTC().After(expiresAt) {
-		_, _ = tx.ExecContext(ctx, "UPDATE contact_verifications SET status='expired', update_date=NOW() WHERE id=$1", verificationID)
-		return fmt.Errorf("%w: verification code has expired", ErrValidation)
+		return failWith(fmt.Errorf("%w: verification code has expired", ErrValidation),
+			`UPDATE contact_verifications SET status='expired', update_date=NOW() WHERE id=$1`, verificationID)
 	}
 	if cfg.RateLimit.Code.MaxAttempts > 0 && counter >= cfg.RateLimit.Code.MaxAttempts {
-		return fmt.Errorf("%w: too many verification attempts", ErrTooManyRequests)
+		return failWith(fmt.Errorf("%w: too many verification attempts", ErrTooManyRequests),
+			`UPDATE contact_verifications SET status='expired', update_date=NOW() WHERE id=$1`, verificationID)
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(codeHash), []byte(code)); err != nil {
-		_, _ = tx.ExecContext(ctx, "UPDATE contact_verifications SET counter=counter+1, update_date=NOW() WHERE id=$1", verificationID)
-		return fmt.Errorf("%w: invalid verification code", ErrUnauthorized)
+		rejection := fmt.Errorf("%w: invalid verification code", ErrUnauthorized)
+		if cfg.RateLimit.Code.MaxAttempts > 0 && counter+1 >= cfg.RateLimit.Code.MaxAttempts {
+			rejection = fmt.Errorf("%w: too many verification attempts", ErrTooManyRequests)
+		}
+		return failWith(rejection, `UPDATE contact_verifications
+			SET counter = counter + 1,
+			    status = CASE WHEN $2 > 0 AND counter + 1 >= $2 THEN 'expired' ELSE status END,
+			    update_date = NOW()
+			WHERE id = $1`, verificationID, cfg.RateLimit.Code.MaxAttempts)
 	}
 
+	var previous string
 	var statement string
 	switch contactType {
 	case "email":
 		statement = "UPDATE users SET email=$1, email_verified=true, verify_status='verified', update_date=NOW() WHERE id=$2"
+		err = tx.QueryRowContext(ctx, "SELECT COALESCE(email, '') FROM users WHERE id=$1 FOR UPDATE", userID).Scan(&previous)
 	case "phone":
 		statement = "UPDATE users SET phone=$1, phone_verified=true, verify_status='verified', update_date=NOW() WHERE id=$2"
+		err = tx.QueryRowContext(ctx, "SELECT COALESCE(phone, '') FROM users WHERE id=$1 FOR UPDATE", userID).Scan(&previous)
 	default:
-		return fmt.Errorf("%w: unsupported contact type", ErrValidation)
+		return nil, fmt.Errorf("%w: unsupported contact type", ErrValidation)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load current contact: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, statement, recipient, userID); err != nil {
-		return fmt.Errorf("update verified contact: %w", err)
+		return nil, fmt.Errorf("update verified contact: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE contact_verifications SET status='confirmed', confirmed_at=NOW(), update_date=NOW() WHERE id=$1", verificationID); err != nil {
-		return fmt.Errorf("complete contact verification: %w", err)
+		return nil, fmt.Errorf("complete contact verification: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("commit contact verification: %w", err)
+		return nil, fmt.Errorf("commit contact verification: %w", err)
 	}
-	return nil
+	return &ContactChange{ContactType: contactType, Recipient: recipient, PreviousRecipient: previous, Purpose: purpose}, nil
 }
 
 func testVerificationCode(cfg *config.Config, recipient string) string {
@@ -371,4 +476,47 @@ func testVerificationCode(cfg *config.Config, recipient string) string {
 		}
 	}
 	return ""
+}
+
+// ContactChangeNotice builds the warning for the contact that a confirmed
+// change replaced. Only an e-mail is warned: the phone channel delivers
+// verification codes only. It returns false when there is nobody to warn:
+// the contact was empty, did not change, or the change finished a
+// registration.
+func ContactChangeNotice(userID int64, change *ContactChange) (delivery.NoticeRequest, bool) {
+	if change == nil || change.Purpose == delivery.PurposeRegistrationVerification || change.ContactType != "email" {
+		return delivery.NoticeRequest{}, false
+	}
+	previous := strings.TrimSpace(change.PreviousRecipient)
+	if previous == "" || strings.EqualFold(previous, strings.TrimSpace(change.Recipient)) {
+		return delivery.NoticeRequest{}, false
+	}
+	return delivery.NoticeRequest{
+		Template: delivery.TemplateAuthContactChanged, Purpose: delivery.PurposeSecurityNotice,
+		RecipientType: delivery.RecipientTypeEmail, Recipient: previous, UserID: userID,
+		Variables: map[string]string{"contact_type": change.ContactType, "new_contact": MaskContact(change.Recipient)},
+	}, true
+}
+
+// PublishContactChangeNotice sends the warning built by ContactChangeNotice.
+func PublishContactChangeNotice(ctx context.Context, conn broker.ChannelProvider, cfg *config.Config, notice delivery.NoticeRequest) error {
+	return delivery.NewPublisher(conn, cfg).PublishNotice(ctx, notice)
+}
+
+// MaskContact keeps enough of an address to recognise it and hides the rest:
+// "jo***@example.com", "+7999***45".
+func MaskContact(value string) string {
+	value = strings.TrimSpace(value)
+	if at := strings.LastIndex(value, "@"); at > 0 {
+		local, domain := value[:at], value[at:]
+		keep := 2
+		if len(local) <= 2 {
+			keep = 1
+		}
+		return local[:keep] + "***" + domain
+	}
+	if len(value) <= 6 {
+		return "***"
+	}
+	return value[:5] + "***" + value[len(value)-2:]
 }

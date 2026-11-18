@@ -36,6 +36,7 @@ func TestContactVerificationRegistrationAndSecondContact(t *testing.T) {
 
 	requested := doRequest("PUT", "/auth/contact_verifications", map[string]interface{}{
 		"contact_type": "phone", "recipient": "+79990000001", "device_uid": "contact-flow-device", "allow_fallback": true,
+		"current_password": "Password1",
 	}, accountToken)
 	if requested.Code != http.StatusOK {
 		t.Fatalf("second contact request: expected 200, got %d: %s", requested.Code, requested.Body.String())

@@ -167,5 +167,12 @@ func revokeSessionsTx(ctx context.Context, tx *sql.Tx, userID int64) ([]string, 
 		}
 		tokens = append(tokens, token)
 	}
-	return tokens, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := deletePendingHandoffs(ctx, tx, userID); err != nil {
+		return nil, err
+	}
+	return tokens, nil
 }

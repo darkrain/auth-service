@@ -177,6 +177,9 @@ func main() {
 		})
 	}
 
+	// Secret columns never leave the generated account routes.
+	r.Use(authmodules.StripSecretFields())
+
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
@@ -225,7 +228,9 @@ func main() {
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pgPool, cacheClient, cfg.AllowedLoginRoles))
-	authRequired.PUT("/auth/registration/contact", handler.ChangeRegistrationContact(pgPool, rmqConn, cfg, cacheClient))
+	authRequired.PUT("/auth/registration/contact",
+		middleware.SendCodeRateLimit(cacheClient, rmqConn, "/auth/registration/contact", cfg),
+		handler.ChangeRegistrationContact(pgPool, rmqConn, cfg, cacheClient))
 
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")

@@ -83,6 +83,9 @@ func TestMain(m *testing.M) {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	// Secret columns never leave the generated account routes.
+	r.Use(authmodules.StripSecretFields())
+
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -108,7 +111,9 @@ func TestMain(m *testing.M) {
 	// Protected routes
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pool, testCache))
-	authRequired.PUT("/auth/registration/contact", handler.ChangeRegistrationContact(pool, nil, cfg, testCache))
+	authRequired.PUT("/auth/registration/contact",
+		middleware.SendCodeRateLimit(testCache, nil, "/auth/registration/contact", cfg),
+		handler.ChangeRegistrationContact(pool, nil, cfg, testCache))
 
 	moduleDB := rgdb.NewDB(pool)
 	generator := rg.NewGenerator(

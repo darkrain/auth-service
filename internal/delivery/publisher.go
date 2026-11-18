@@ -19,6 +19,7 @@ const (
 // Publisher makes delivery testable without an AMQP broker.
 type Publisher interface {
 	PublishCode(context.Context, CodeRequest) error
+	PublishNotice(context.Context, NoticeRequest) error
 }
 
 type AMQPPublisher struct {
@@ -35,6 +36,18 @@ func (p *AMQPPublisher) PublishCode(ctx context.Context, request CodeRequest) er
 	if err != nil {
 		return err
 	}
+	return p.publish(ctx, event)
+}
+
+func (p *AMQPPublisher) PublishNotice(ctx context.Context, request NoticeRequest) error {
+	event, err := NewNoticeEvent(p.config, request)
+	if err != nil {
+		return err
+	}
+	return p.publish(ctx, event)
+}
+
+func (p *AMQPPublisher) publish(ctx context.Context, event *RequestEvent) error {
 	switch p.config.MessageBroker.PublishMode {
 	case PublishModeDisabled:
 		return nil
