@@ -113,26 +113,15 @@ func RequestPasswordReset(
 		return nil
 	}
 
-	// Check if this is a test account
-	testCode := ""
-	for _, ta := range cfg.TestAccounts {
-		if strings.EqualFold(ta.Login, login) {
-			testCode = ta.Code
-			break
-		}
+	// TestAccounts only shortcut login and contact verification. A reset code
+	// replaces the password, so it is always random and always delivered: a
+	// fixed code from the stand configuration would let anyone who knows it
+	// take over the account.
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return fmt.Errorf("crypto/rand: %w", err)
 	}
-
-	// Generate or use fixed code
-	var code string
-	if testCode != "" {
-		code = testCode
-	} else {
-		n, err := rand.Int(rand.Reader, big.NewInt(1000000))
-		if err != nil {
-			return fmt.Errorf("crypto/rand: %w", err)
-		}
-		code = fmt.Sprintf("%06d", n.Int64())
-	}
+	code := fmt.Sprintf("%06d", n.Int64())
 
 	now := time.Now()
 	ttlSec := cfg.PasswordResetCodeTTLMin * 60
@@ -153,9 +142,6 @@ func RequestPasswordReset(
 		return fmt.Errorf("db: upsert confirm_codes: %w", upsertErr)
 	}
 
-	if testCode != "" && !cfg.CodeDelivery.PublishTestAccountCodes {
-		return nil
-	}
 	recipientType := delivery.RecipientTypePhone
 	if isEmail {
 		recipientType = delivery.RecipientTypeEmail

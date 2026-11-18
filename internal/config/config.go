@@ -250,11 +250,22 @@ func (c *Config) Validate() error {
 	}
 
 	for _, role := range c.AllowedRoles {
-		if role == "admin" || role == "system" {
+		if IsStaffRole(role) {
 			return fmt.Errorf("config: AllowedRoles must not contain reserved role %q", role)
 		}
 	}
 	return nil
+}
+
+// staffRoles are assigned by an administrator, never chosen at registration.
+// The API treats support as staff (it sees every support ticket), so a stand
+// template that lists it in AllowedRoles lets anyone register as staff.
+var staffRoles = map[string]struct{}{"admin": {}, "system": {}, "sudo": {}, "support": {}, "staff": {}}
+
+// IsStaffRole reports whether role is a staff role that registration must never grant.
+func IsStaffRole(role string) bool {
+	_, ok := staffRoles[strings.ToLower(strings.TrimSpace(role))]
+	return ok
 }
 
 func (c *Config) CodeProviderChain(recipientType string) []string {

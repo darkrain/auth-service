@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // getResetCode reads the password reset code directly from the DB for a given login + device.
@@ -19,6 +21,69 @@ func getResetCode(t *testing.T, login, deviceUID string) string {
 		t.Fatalf("getResetCode(%s, %s): %v", login, deviceUID, err)
 	}
 	return code
+}
+
+// knownResetCode replaces the random reset code of a pending request with a
+// code the test knows. Reset codes are always random, test accounts included,
+// and only their bcrypt hash is stored.
+const knownResetCode = "482913"
+
+func setKnownResetCode(t *testing.T, login, deviceUID string) {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte(knownResetCode), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := testPool.ExecContext(context.Background(),
+		`UPDATE confirm_codes SET code=$3 WHERE recipient=$1 AND device_uid=$2 AND auth_type='password_reset'`,
+		login, deviceUID, string(hash))
+	if err != nil {
+		t.Fatalf("setKnownResetCode: %v", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		t.Fatalf("setKnownResetCode: %d pending reset codes", n)
+	}
+}
+
+// TestPasswordReset_TestAccountCodeIsNotAResetCode: the fixed TestAccounts
+// code signs a stand account in, but must never reset its password.
+func TestPasswordReset_TestAccountCodeIsNotAResetCode(t *testing.T) {
+	truncateTables(t)
+
+	login := "reset-test@example.com" // TestAccount with fixed code 777777
+	password := "OldPass1"
+	deviceUID := "device-reset-fixed-code"
+
+	regToken := registerUser(t, login, password)
+	verifyUser(t, login, deviceUID, regToken)
+
+	w := doRequestWithDevice("POST", "/auth/password/reset-request", map[string]string{
+		"login":      login,
+		"device_uid": deviceUID,
+	}, "", deviceUID)
+	if w.Code != http.StatusOK {
+		t.Fatalf("reset-request: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if bcrypt.CompareHashAndPassword([]byte(getResetCode(t, login, deviceUID)), []byte("777777")) == nil {
+		t.Fatal("reset code of a test account is its fixed TestAccounts code")
+	}
+
+	w = doRequestWithDevice("POST", "/auth/password/reset-confirm", map[string]interface{}{
+		"login":        login,
+		"code":         "777777",
+		"device_uid":   deviceUID,
+		"new_password": "NewPass9",
+	}, "", deviceUID)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("fixed code: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if body := parseJSON(w); body["code"] != "ERR_INVALID_CODE" {
+		t.Errorf("expected ERR_INVALID_CODE, got %v", body["code"])
+	}
+	w = doRequest("POST", "/auth/login", map[string]string{"login": login, "password": password}, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("the old password must still work: got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 // TestPasswordReset_HappyPath tests the full flow:
@@ -44,10 +109,11 @@ func TestPasswordReset_HappyPath(t *testing.T) {
 		t.Fatalf("reset-request: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Step 2: confirm reset with fixed test code 777777
+	// Step 2: confirm reset with the code the user received
+	setKnownResetCode(t, login, deviceUID)
 	w = doRequestWithDevice("POST", "/auth/password/reset-confirm", map[string]interface{}{
 		"login":        login,
-		"code":         "777777",
+		"code":         knownResetCode,
 		"device_uid":   deviceUID,
 		"new_password": newPassword,
 	}, "", deviceUID)
@@ -148,9 +214,10 @@ func TestPasswordReset_WeakPassword(t *testing.T) {
 	}
 
 	// Confirm with valid code but weak password (too short / no digit)
+	setKnownResetCode(t, login, deviceUID)
 	w = doRequestWithDevice("POST", "/auth/password/reset-confirm", map[string]interface{}{
 		"login":        login,
-		"code":         "777777",
+		"code":         knownResetCode,
 		"device_uid":   deviceUID,
 		"new_password": "abc", // too short, no digit
 	}, "", deviceUID)
@@ -194,9 +261,10 @@ func TestPasswordReset_SessionsInvalidated(t *testing.T) {
 	}
 
 	// Confirm reset
+	setKnownResetCode(t, login, deviceUID)
 	w = doRequestWithDevice("POST", "/auth/password/reset-confirm", map[string]interface{}{
 		"login":        login,
-		"code":         "777777",
+		"code":         knownResetCode,
 		"device_uid":   deviceUID,
 		"new_password": newPassword,
 	}, "", deviceUID)
