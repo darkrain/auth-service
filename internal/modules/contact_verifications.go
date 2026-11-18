@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"github.com/darkrain/auth-service/internal/config"
 	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/handler"
+	"github.com/darkrain/auth-service/internal/middleware"
 	"github.com/darkrain/auth-service/internal/service"
 	module "github.com/darkrain/request-generator"
 	"github.com/darkrain/request-generator/actions"
@@ -73,8 +76,8 @@ func ContactVerificationsModule(pool *sql.DB, conn broker.ChannelProvider, cache
 	}, Actions: []actions.ModuleAction{
 		actions.ListModuleAction{Label: "contact_verifications.actions.list", Columns: read, Permission: permissions, Auth: true, Where: owned(t), Filter: []pg.Column{t.ContactType, t.Status}, Sort: []pg.Column{t.CreationDate, t.ExpiresAt}, SortDefault: t.CreationDate, SortDefaultDirection: actions.SortDESC, Size: 20, Maxsize: 100},
 		actions.ViewModuleAction{Label: "contact_verifications.actions.view", Columns: read, Permission: permissions, Auth: true, By: []pg.Column{t.ID}},
-		actions.AddModuleAction{Label: "contact_verifications.actions.add", Columns: []pg.Column{t.UserID, t.ContactType, t.Recipient, t.DeviceUID, t.Provider, t.AllowFallback, t.Purpose, t.Status, t.CodeHash, t.Counter, t.SentTS, t.ExpiresAt}, Permission: permissions, Auth: true, BeforeAction: requestContactVerification(pool, conn, cfg)},
-		actions.UpdateModuleAction{Label: "contact_verifications.actions.update", Columns: []pg.Column{t.Status, t.ConfirmedAt}, Permission: permissions, Auth: true, By: []pg.Column{t.ID}, Where: owned(t), BeforeAction: confirmContactVerification(pool, cacheClient, cfg)},
+		actions.AddModuleAction{Label: "contact_verifications.actions.add", Columns: []pg.Column{t.UserID, t.ContactType, t.Recipient, t.DeviceUID, t.Provider, t.AllowFallback, t.Purpose, t.Status, t.CodeHash, t.Counter, t.SentTS, t.ExpiresAt}, Permission: permissions, Auth: true, BeforeAction: requestContactVerification(pool, conn, cacheClient, cfg)},
+		actions.UpdateModuleAction{Label: "contact_verifications.actions.update", Columns: []pg.Column{t.Status, t.ConfirmedAt}, Permission: permissions, Auth: true, By: []pg.Column{t.ID}, Where: owned(t), BeforeAction: confirmContactVerification(pool, conn, cacheClient, cfg)},
 	}, RoleWhere: []actions.RoleWhere{{Role: actions.RoleAll, Where: owned(t)}}, Defrec: actions.DefrecModuleAction{Label: "contact_verifications.actions.defrec"}, Render: renderer.Universal{
 		List:   &renderer.ListPage{ID: "contact-verifications", Title: "contact_verifications.label", Filters: &renderer.Filters{Enabled: true, Primary: []string{"contact_type", "status"}}, Pagination: &renderer.Pagination{Mode: renderer.PaginationServer}},
 		Form:   &renderer.FormPage{ID: "contact-verification-form", Title: "contact_verifications.label", Layout: renderer.LayoutOneColumn, Sections: []renderer.FormSection{{ID: "contact", Fields: []string{"contact_type", "recipient", "provider", "allow_fallback"}, Block: &renderer.Block{Type: renderer.BlockPanel}}}},
@@ -111,7 +114,10 @@ func owned(t contactVerificationsTable) func(*gin.Context) pg.BoolExpression {
 	}
 }
 
-func requestContactVerification(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config) func(*gin.Context) error {
+// errRateLimited tells the generator that the hook has already answered 429.
+var errRateLimited = fmt.Errorf("too many requests")
+
+func requestContactVerification(pool *sql.DB, conn broker.ChannelProvider, cacheClient *cache.Client, cfg *config.Config) func(*gin.Context) error {
 	return func(c *gin.Context) error {
 		userID, ok := userID(c)
 		if !ok {
@@ -127,13 +133,32 @@ func requestContactVerification(pool *sql.DB, conn broker.ChannelProvider, cfg *
 			DeviceUID: inputString(input, "device_uid"), Provider: inputString(input, "provider"), AllowFallback: fallback,
 			Purpose: "verification",
 		}
+		// Every request sends an e-mail or a paid phone message, so it has the
+		// same IP and device limits as the other routes that send codes.
+		if !middleware.AllowSendCode(c, cacheClient, conn, "/auth/contact_verifications", cfg, firstNonEmpty(c.GetHeader("X-Device-ID"), request.DeviceUID)) {
+			return errRateLimited
+		}
 		if authType, _ := c.Get("auth_type"); authType == "registration" {
 			if err := restrictRegistrationContact(c, &request); err != nil {
 				return err
 			}
+		} else {
+			// A login contact of a finished account is what password reset
+			// trusts. Changing or adding one needs the owner again, not only a
+			// session: the current password, and the authenticator code when
+			// two-factor authentication is on.
+			if err := service.VerifyStepUp(c.Request.Context(), pool, cfg, userID, inputString(input, "current_password"), inputString(input, "two_factor_code")); err != nil {
+				return accountActionError(c, err.Error(), map[string]string{accountSecurityErrorField(err, "current_password"): err.Error()})
+			}
 		}
 		prepared, err := service.PrepareContactVerification(c.Request.Context(), pool, cfg, request)
 		if err != nil {
+			var recipientLimit *service.RecipientLimitError
+			if errors.As(err, &recipientLimit) {
+				message := fmt.Sprintf(module.Translate(c, "contact_verifications.errors.recipient_limit", "Codes were already sent to %d different contacts today. Try again tomorrow."), recipientLimit.Limit)
+				c.JSON(http.StatusTooManyRequests, gin.H{"error": message, "code": handler.CodeTooManyRequests, "errors": gin.H{"recipient": message}})
+				return err
+			}
 			if retryAfter := service.ResendRetryAfter(err); retryAfter > 0 {
 				c.Header("Retry-After", strconv.Itoa(retryAfter))
 				message := fmt.Sprintf(module.Translate(c, "contact_verifications.errors.resend_cooldown", "A verification code was sent recently. Try again in %d seconds."), retryAfter)
@@ -174,7 +199,7 @@ func restrictRegistrationContact(c *gin.Context, request *service.ContactVerific
 	return nil
 }
 
-func confirmContactVerification(pool *sql.DB, cacheClient *cache.Client, cfg *config.Config) func(*gin.Context) error {
+func confirmContactVerification(pool *sql.DB, conn broker.ChannelProvider, cacheClient *cache.Client, cfg *config.Config) func(*gin.Context) error {
 	return func(c *gin.Context) error {
 		userID, ok := userID(c)
 		if !ok {
@@ -188,14 +213,43 @@ func confirmContactVerification(pool *sql.DB, cacheClient *cache.Client, cfg *co
 		if err != nil {
 			return fmt.Errorf("verification request not found")
 		}
-		if err = service.ConfirmContactVerification(c.Request.Context(), pool, cfg, userID, verificationID, inputString(input, "code")); err != nil {
+		limits := cfg.RateLimit
+		if !middleware.Allow(c, cacheClient, conn, "/auth/contact_verifications/confirm", limits.IP.LoginMaxAttempts, limits.IP.LoginWindowSec,
+			limits.Device.LoginMaxAttempts, limits.Device.LoginWindowSec, c.GetHeader("X-Device-ID")) {
+			return errRateLimited
+		}
+		ctx := c.Request.Context()
+		change, err := service.ConfirmContactVerification(ctx, pool, cfg, userID, verificationID, inputString(input, "code"))
+		if err != nil {
 			return err
 		}
-		if token, ok := c.Get("token"); ok && cacheClient != nil {
-			_ = cacheClient.DeleteSession(c.Request.Context(), fmt.Sprint(token))
+		token := contextToken(c)
+		if change.Purpose != delivery.PurposeRegistrationVerification {
+			// The new contact can reset the password, so other sessions must
+			// not outlive the change.
+			if err := service.RevokeOtherSessions(ctx, pool, cacheClient, userID, token); err != nil {
+				return err
+			}
+		}
+		if notice, ok := service.ContactChangeNotice(userID, change); ok {
+			if err := service.PublishContactChangeNotice(ctx, conn, cfg, notice); err != nil {
+				log.Printf("contact change notice for user %d: %v", userID, err)
+			}
+		}
+		if token != "" && cacheClient != nil {
+			_ = cacheClient.DeleteSession(ctx, token)
 		}
 		return replaceBody(c, map[string]interface{}{"status": "confirmed", "confirmed_at": time.Now().UTC().Format(time.RFC3339Nano)})
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func inputString(input map[string]interface{}, key string) string {

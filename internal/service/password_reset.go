@@ -200,17 +200,32 @@ func ConfirmPasswordReset(
 		return err
 	}
 
-	// Find reset code
+	// Reserve one attempt before the slow bcrypt comparison. Reading the
+	// counter first and incrementing it after the comparison let parallel
+	// requests all pass the limit check, so one code got far more guesses than
+	// MaxAttempts. The conditional UPDATE serialises on the row: at most
+	// MaxAttempts requests get a row back, every later one gets none.
+	maxAttempts := cfg.RateLimit.Code.MaxAttempts
 	var storedCode string
-	var counter int64
 	var sentTS time.Time
 	err := pool.QueryRowContext(ctx,
-		`SELECT code, counter, sent_ts FROM confirm_codes
-		 WHERE device_uid=$1 AND recipient=$2 AND auth_type=$3 LIMIT 1`,
-		deviceUID, login, authTypePasswordReset,
-	).Scan(&storedCode, &counter, &sentTS)
-	if err != nil {
+		`UPDATE confirm_codes SET counter = counter + 1
+		 WHERE device_uid=$1 AND recipient=$2 AND auth_type=$3 AND ($4 <= 0 OR counter < $4)
+		 RETURNING code, sent_ts`,
+		deviceUID, login, authTypePasswordReset, maxAttempts,
+	).Scan(&storedCode, &sentTS)
+	if errors.Is(err, sql.ErrNoRows) {
+		var exists bool
+		if existsErr := pool.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM confirm_codes WHERE device_uid=$1 AND recipient=$2 AND auth_type=$3)`,
+			deviceUID, login, authTypePasswordReset,
+		).Scan(&exists); existsErr == nil && exists {
+			return ErrTooManyCodeAttempts
+		}
 		return ErrInvalidCode
+	}
+	if err != nil {
+		return fmt.Errorf("db: reserve reset attempt: %w", err)
 	}
 
 	// Check TTL
@@ -222,22 +237,7 @@ func ConfirmPasswordReset(
 		}
 	}
 
-	// A six-digit code with no cap on guesses is not a secret: the counter
-	// below was incremented on every wrong answer and never read, so the whole
-	// space could be walked through. The contact-verification path already
-	// answers this way.
-	if cfg.RateLimit.Code.MaxAttempts > 0 && counter >= int64(cfg.RateLimit.Code.MaxAttempts) {
-		return ErrTooManyCodeAttempts
-	}
-
-	// Compare code
 	if !confirmCodeMatches(storedCode, code) {
-		// Increment counter
-		_, _ = pool.ExecContext(ctx,
-			`UPDATE confirm_codes SET counter=counter+1
-			 WHERE device_uid=$1 AND recipient=$2 AND auth_type=$3`,
-			deviceUID, login, authTypePasswordReset,
-		)
 		return ErrInvalidCode
 	}
 
@@ -268,29 +268,11 @@ func ConfirmPasswordReset(
 		deviceUID, login, authTypePasswordReset,
 	)
 
-	// Invalidate all active sessions for this user
-	// First, collect session tokens for Redis cache invalidation
-	if cacheClient != nil {
-		rows, qErr := pool.QueryContext(ctx,
-			`SELECT token FROM sessions WHERE user_id=$1 AND blocked=false`,
-			userID,
-		)
-		if qErr == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var t string
-				if rows.Scan(&t) == nil {
-					_ = cacheClient.DeleteSession(ctx, t)
-				}
-			}
-		}
+	// Invalidate all sessions of this user, including device-handoff codes
+	// that are still waiting to be redeemed.
+	if err := RevokeAllSessions(ctx, pool, cacheClient, userID); err != nil {
+		return err
 	}
-
-	// Mark all sessions as blocked in DB
-	_, _ = pool.ExecContext(ctx,
-		`UPDATE sessions SET blocked=true WHERE user_id=$1`,
-		userID,
-	)
 
 	return nil
 }

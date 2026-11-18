@@ -108,7 +108,9 @@ func TestMain(m *testing.M) {
 	// Protected routes
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pool, testCache))
-	authRequired.PUT("/auth/registration/contact", handler.ChangeRegistrationContact(pool, nil, cfg, testCache))
+	authRequired.PUT("/auth/registration/contact",
+		middleware.SendCodeRateLimit(testCache, nil, "/auth/registration/contact", cfg),
+		handler.ChangeRegistrationContact(pool, nil, cfg, testCache))
 
 	moduleDB := rgdb.NewDB(pool)
 	generator := rg.NewGenerator(

@@ -225,7 +225,9 @@ func main() {
 	// Protected routes (require valid session token)
 	authRequired := r.Group("/")
 	authRequired.Use(middleware.Auth(pgPool, cacheClient, cfg.AllowedLoginRoles))
-	authRequired.PUT("/auth/registration/contact", handler.ChangeRegistrationContact(pgPool, rmqConn, cfg, cacheClient))
+	authRequired.PUT("/auth/registration/contact",
+		middleware.SendCodeRateLimit(cacheClient, rmqConn, "/auth/registration/contact", cfg),
+		handler.ChangeRegistrationContact(pgPool, rmqConn, cfg, cacheClient))
 
 	// API key management (admin and system only)
 	apiKeys := authRequired.Group("/auth/api-keys")

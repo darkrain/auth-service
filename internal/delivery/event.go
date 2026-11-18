@@ -18,10 +18,12 @@ const (
 
 	TemplateAuthVerificationCode = "auth_verification_code"
 	TemplateAuthPasswordReset    = "auth_password_reset"
+	TemplateAuthContactChanged   = "auth_contact_changed"
 
 	PurposeRegistrationVerification = "registration_verification"
 	PurposeVerification             = "verification"
 	PurposePasswordReset            = "password_reset"
+	PurposeSecurityNotice           = "security_notice"
 )
 
 var ErrProviderNotAllowed = errors.New("delivery provider is not allowed")
@@ -84,6 +86,38 @@ func NewCodeEvent(cfg *config.Config, req CodeRequest) (*RequestEvent, error) {
 		UserID:    req.UserID, CreatedAt: time.Now().UTC(),
 		Delivery: DeliveryPolicy{SelectedProvider: req.SelectedProvider, ProviderChain: cfg.CodeProviderChain(req.RecipientType), AllowFallback: allowFallback},
 		Metadata: map[string]string{"device_uid": req.DeviceUID, "brand": cfg.RegistrationBrand},
+	}, nil
+}
+
+// NoticeRequest is a message without a code, such as the warning sent to the
+// previous e-mail after the account's contact changed.
+type NoticeRequest struct {
+	Template      string
+	Purpose       string
+	RecipientType string
+	Recipient     string
+	Variables     map[string]string
+	UserID        int64
+}
+
+func NewNoticeEvent(cfg *config.Config, req NoticeRequest) (*RequestEvent, error) {
+	if req.RecipientType != RecipientTypeEmail {
+		return nil, fmt.Errorf("delivery: notices support only e-mail, got %q", req.RecipientType)
+	}
+	eventID, err := randomID()
+	if err != nil {
+		return nil, err
+	}
+	variables := map[string]string{}
+	for key, value := range req.Variables {
+		variables[key] = value
+	}
+	return &RequestEvent{
+		Version: "v1", EventID: eventID, Type: EventTypeDeliveryRequested, Source: "auth-service",
+		Template: req.Template, Purpose: req.Purpose, RecipientType: req.RecipientType, Recipient: req.Recipient,
+		Variables: variables, UserID: req.UserID, CreatedAt: time.Now().UTC(),
+		Delivery: DeliveryPolicy{ProviderChain: cfg.CodeProviderChain(req.RecipientType), AllowFallback: true},
+		Metadata: map[string]string{"brand": cfg.RegistrationBrand},
 	}, nil
 }
 

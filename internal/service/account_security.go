@@ -110,6 +110,12 @@ func ConfigureTwoFactor(ctx context.Context, pool *sql.DB, cfg *config.Config, c
 
 	now := time.Now().UTC()
 	if enabled {
+		// An enabled authenticator is replaced only through disabling it, which
+		// proves the stored factor and ends the other sessions. Accepting a new
+		// secret here let a bare session token take over the second factor.
+		if currentEnabled && storedSecret != "" {
+			return nil, fmt.Errorf("%w: two-factor authentication is already enabled; disable the current authenticator first", ErrValidation)
+		}
 		secret = normalizeTOTPSecret(secret)
 		if secret == "" {
 			return nil, fmt.Errorf("%w: two-factor secret is required", ErrValidation)
@@ -167,26 +173,8 @@ func ChangePassword(ctx context.Context, pool *sql.DB, cfg *config.Config, cache
 		return nil, fmt.Errorf("database is unavailable")
 	}
 
-	var storedHash, encryptedSecret string
-	var twoFactorEnabled bool
-	if err := pool.QueryRowContext(ctx, `SELECT password, two_factor_enabled, COALESCE(two_factor_secret_encrypted, '') FROM users WHERE id=$1`, userID).Scan(&storedHash, &twoFactorEnabled, &encryptedSecret); err != nil {
-		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(cfg.PasswordSalt+strings.TrimSpace(currentPassword))); err != nil {
-		return nil, fmt.Errorf("%w: current password is invalid", ErrUnauthorized)
-	}
-	if twoFactorEnabled {
-		secret, err := decryptTwoFactorSecret(cfg, encryptedSecret)
-		if err != nil {
-			return nil, fmt.Errorf("two-factor configuration is invalid: %w", err)
-		}
-		valid, err := validateTOTP(secret, strings.TrimSpace(twoFactorCode))
-		if err != nil {
-			return nil, err
-		}
-		if !valid {
-			return nil, fmt.Errorf("%w: invalid two-factor code", ErrUnauthorized)
-		}
+	if err := VerifyStepUp(ctx, pool, cfg, userID, currentPassword, twoFactorCode); err != nil {
+		return nil, err
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(cfg.PasswordSalt+newPassword), 12)
@@ -209,26 +197,8 @@ func DeactivateAccount(ctx context.Context, pool *sql.DB, cfg *config.Config, ca
 	if pool == nil {
 		return nil, fmt.Errorf("database is unavailable")
 	}
-	var storedHash, encryptedSecret string
-	var twoFactorEnabled bool
-	if err := pool.QueryRowContext(ctx, `SELECT password, two_factor_enabled, COALESCE(two_factor_secret_encrypted, '') FROM users WHERE id=$1`, userID).Scan(&storedHash, &twoFactorEnabled, &encryptedSecret); err != nil {
-		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(cfg.PasswordSalt+strings.TrimSpace(currentPassword))); err != nil {
-		return nil, fmt.Errorf("%w: current password is invalid", ErrUnauthorized)
-	}
-	if twoFactorEnabled {
-		secret, err := decryptTwoFactorSecret(cfg, encryptedSecret)
-		if err != nil {
-			return nil, fmt.Errorf("two-factor configuration is invalid: %w", err)
-		}
-		valid, err := validateTOTP(secret, strings.TrimSpace(twoFactorCode))
-		if err != nil {
-			return nil, err
-		}
-		if !valid {
-			return nil, fmt.Errorf("%w: invalid two-factor code", ErrUnauthorized)
-		}
+	if err := VerifyStepUp(ctx, pool, cfg, userID, currentPassword, twoFactorCode); err != nil {
+		return nil, err
 	}
 	if err := RevokeAllSessions(ctx, pool, cacheClient, userID); err != nil {
 		return nil, err
@@ -237,6 +207,41 @@ func DeactivateAccount(ctx context.Context, pool *sql.DB, cfg *config.Config, ca
 		"verify_status":  "deactivated",
 		"deactivated_at": time.Now().UTC().Format(time.RFC3339Nano),
 	}, nil
+}
+
+// VerifyStepUp re-checks the account owner before a sensitive change: the
+// current password, and the code of the stored authenticator when two-factor
+// authentication is enabled. A session token alone is not enough.
+func VerifyStepUp(ctx context.Context, pool *sql.DB, cfg *config.Config, userID int64, currentPassword, twoFactorCode string) error {
+	if pool == nil {
+		return fmt.Errorf("database is unavailable")
+	}
+	var storedHash, encryptedSecret string
+	var twoFactorEnabled bool
+	if err := pool.QueryRowContext(ctx, `SELECT password, two_factor_enabled, COALESCE(two_factor_secret_encrypted, '') FROM users WHERE id=$1`, userID).Scan(&storedHash, &twoFactorEnabled, &encryptedSecret); err != nil {
+		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if strings.TrimSpace(currentPassword) == "" || bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(cfg.PasswordSalt+strings.TrimSpace(currentPassword))) != nil {
+		return fmt.Errorf("%w: current password is invalid", ErrUnauthorized)
+	}
+	if twoFactorEnabled {
+		secret, err := decryptTwoFactorSecret(cfg, encryptedSecret)
+		if err != nil {
+			return fmt.Errorf("two-factor configuration is invalid: %w", err)
+		}
+		code := strings.TrimSpace(twoFactorCode)
+		if code == "" {
+			return fmt.Errorf("%w: two-factor code is required", ErrUnauthorized)
+		}
+		valid, err := validateTOTP(secret, code)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return fmt.Errorf("%w: invalid two-factor code", ErrUnauthorized)
+		}
+	}
+	return nil
 }
 
 func RevokeOtherSessions(ctx context.Context, pool *sql.DB, cacheClient *cache.Client, userID int64, currentToken string) error {
@@ -267,10 +272,31 @@ func revokeSessions(ctx context.Context, pool *sql.DB, cacheClient *cache.Client
 	if _, err := pool.ExecContext(ctx, `UPDATE sessions SET blocked=true, update_date=NOW() WHERE user_id=$1 AND blocked=false AND ($2='' OR token<>$2)`, userID, keepToken); err != nil {
 		return fmt.Errorf("revoke active sessions: %w", err)
 	}
+	if err := deletePendingHandoffs(ctx, pool, userID); err != nil {
+		return err
+	}
 	if cacheClient != nil {
 		for _, token := range tokens {
 			_ = cacheClient.DeleteSession(ctx, token)
 		}
+	}
+	return nil
+}
+
+// A device-handoff code (api, POST /api/device-handoffs) waits as a blocked
+// session row and turns into a live session when a phone redeems it. Blocked
+// is also what revocation writes, so revoking the sessions left the code
+// usable: a code made from a stolen session outlived a password change.
+// Every revocation removes the codes that are still waiting.
+const pendingHandoffDelete = `DELETE FROM sessions WHERE user_id=$1 AND auth_type='handoff' AND device_uid='handoff:pending' AND blocked`
+
+type sqlExecer interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}
+
+func deletePendingHandoffs(ctx context.Context, db sqlExecer, userID int64) error {
+	if _, err := db.ExecContext(ctx, pendingHandoffDelete, userID); err != nil {
+		return fmt.Errorf("revoke pending device handoffs: %w", err)
 	}
 	return nil
 }
