@@ -6,9 +6,12 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +32,7 @@ func totpCode(t *testing.T, secret string) string {
 func enableTwoFactor(t *testing.T, userID int64, token, secret string) {
 	t.Helper()
 	w := doRequest("POST", fmt.Sprintf("/auth/account_two_factor/id/%d", userID), map[string]interface{}{
-		"two_factor_enabled": true, "two_factor_secret": secret, "two_factor_code": totpCode(t, secret),
+		"two_factor_enabled": true, "two_factor_secret": secret, "two_factor_code": totpCode(t, secret), "current_password": "Password1",
 	}, token)
 	if w.Code != http.StatusOK {
 		t.Fatalf("enable two factor: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -510,4 +513,105 @@ func TestSEC22RecipientLimitSetting(t *testing.T) {
 	if got := service.ContactRecipientsPerDay(ctx, testPool); got != 2 {
 		t.Fatalf("setting 2: got %d", got)
 	}
+}
+
+// assertNoSecretFields fails when a response carries a password hash, a
+// two-factor secret or a code hash at any depth.
+func assertNoSecretFields(t *testing.T, name string, raw []byte) {
+	t.Helper()
+	var value interface{}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatalf("%s: response is not JSON: %s", name, raw)
+	}
+	var walk func(interface{})
+	walk = func(v interface{}) {
+		switch typed := v.(type) {
+		case map[string]interface{}:
+			for key, nested := range typed {
+				switch key {
+				case "password", "two_factor_secret", "two_factor_secret_encrypted", "code_hash", "token":
+					t.Fatalf("%s: response exposes %q: %s", name, key, raw)
+				}
+				walk(nested)
+			}
+		case []interface{}:
+			for _, nested := range typed {
+				walk(nested)
+			}
+		}
+	}
+	walk(value)
+	if strings.Contains(string(raw), "$2a$") {
+		t.Fatalf("%s: response contains a bcrypt hash: %s", name, raw)
+	}
+}
+
+// Follow-up to the audit: generated account routes never return secret
+// columns, whichever action answers.
+func TestAccountRoutesNeverReturnSecretColumns(t *testing.T) {
+	truncateTables(t)
+	login, password := "secret-fields@example.com", "Password1"
+	userID, token := verifiedAccount(t, login, password)
+	secret := "JBSWY3DPEHPK3PXP"
+
+	responses := map[string]*httptest.ResponseRecorder{}
+	responses["enable two factor"] = doRequest("POST", fmt.Sprintf("/auth/account_two_factor/id/%d", userID), map[string]interface{}{
+		"two_factor_enabled": true, "two_factor_secret": secret, "two_factor_code": totpCode(t, secret), "current_password": password,
+	}, token)
+	responses["disable two factor"] = doRequest("POST", fmt.Sprintf("/auth/account_two_factor/id/%d", userID), map[string]interface{}{
+		"two_factor_enabled": false, "two_factor_code": totpCode(t, secret),
+	}, token)
+	responses["change password"] = doRequest("POST", fmt.Sprintf("/auth/account_password/id/%d", userID), map[string]string{
+		"current_password": password, "new_password": "NewPassword2", "confirmation": "NewPassword2",
+	}, token)
+	responses["account view"] = doRequest("GET", fmt.Sprintf("/auth/account_security/view/id/%d", userID), nil, token)
+	responses["sessions"] = doRequest("GET", "/auth/account_sessions?size=100", nil, token)
+	requested := doRequest("PUT", "/auth/contact_verifications", map[string]interface{}{
+		"contact_type": "email", "recipient": "corrected@example.com", "device_uid": "secret-device", "allow_fallback": true, "current_password": "NewPassword2",
+	}, token)
+	responses["contact request"] = requested
+	requestID, _ := parseJSON(requested)["value"].(float64)
+	responses["contact view"] = doRequest("GET", "/auth/contact_verifications/view/id/"+numberPath(requestID), nil, token)
+	responses["contact list"] = doRequest("GET", "/auth/contact_verifications?size=100", nil, token)
+	responses["contact confirm"] = doRequest("POST", "/auth/contact_verifications/id/"+numberPath(requestID), map[string]string{"code": "333333"}, token)
+
+	for name, w := range responses {
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", name, w.Code, w.Body.String())
+		}
+		assertNoSecretFields(t, name, w.Body.Bytes())
+	}
+	if enabled := parseJSON(responses["enable two factor"])["two_factor_enabled"]; enabled != true {
+		t.Fatalf("enable response must still say two_factor_enabled=true: %s", responses["enable two factor"].Body.String())
+	}
+}
+
+// Follow-up to SEC-04: turning two-factor authentication on needs the current
+// password, not only a session.
+func TestEnablingTwoFactorRequiresCurrentPassword(t *testing.T) {
+	truncateTables(t)
+	login, password := "totp-step-up@example.com", "Password1"
+	userID, token := verifiedAccount(t, login, password)
+	secret := "JBSWY3DPEHPK3PXP"
+	for name, extra := range map[string]string{"no password": "", "wrong password": "WrongPassword9"} {
+		body := map[string]interface{}{"two_factor_enabled": true, "two_factor_secret": secret, "two_factor_code": totpCode(t, secret)}
+		if extra != "" {
+			body["current_password"] = extra
+		}
+		w := doRequest("POST", fmt.Sprintf("/auth/account_two_factor/id/%d?lang=ru", userID), body, token)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d: %s", name, w.Code, w.Body.String())
+		}
+		if errs, _ := parseJSON(w)["errors"].(map[string]interface{}); errs["current_password"] != "Неверный текущий пароль." {
+			t.Fatalf("%s: error must point at current_password in the person's language: %s", name, w.Body.String())
+		}
+		var enabled bool
+		if err := testPool.QueryRowContext(context.Background(), `SELECT two_factor_enabled FROM users WHERE id=$1`, userID).Scan(&enabled); err != nil {
+			t.Fatal(err)
+		}
+		if enabled {
+			t.Fatalf("%s: two-factor must stay off", name)
+		}
+	}
+	enableTwoFactor(t, userID, token, secret)
 }

@@ -160,7 +160,7 @@ func accountTwoFactorBefore(pool *sql.DB, cacheClient *cache.Client, cfg *config
 		if !ok {
 			return accountActionError(c, "two_factor_enabled is required", map[string]string{"two_factor_enabled": "two_factor_enabled is required"})
 		}
-		output, err := service.ConfigureTwoFactor(c.Request.Context(), pool, cfg, cacheClient, userID, contextToken(c), enabled, inputString(input, "two_factor_secret"), inputString(input, "two_factor_code"))
+		output, err := service.ConfigureTwoFactor(c.Request.Context(), pool, cfg, cacheClient, userID, contextToken(c), enabled, inputString(input, "two_factor_secret"), inputString(input, "two_factor_code"), inputString(input, "current_password"))
 		if err != nil {
 			message := localizedSecurityError(c, err)
 			return accountActionError(c, message, map[string]string{accountSecurityErrorField(err, "two_factor_code"): message})

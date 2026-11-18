@@ -90,7 +90,7 @@ func VerifyLoginTOTP(ctx context.Context, pool *sql.DB, cfg *config.Config, cach
 	return createSession(ctx, pool, cfg, challenge.UserID, deviceUID, ip)
 }
 
-func ConfigureTwoFactor(ctx context.Context, pool *sql.DB, cfg *config.Config, cacheClient *cache.Client, userID int64, currentToken string, enabled bool, secret, code string) (map[string]interface{}, error) {
+func ConfigureTwoFactor(ctx context.Context, pool *sql.DB, cfg *config.Config, cacheClient *cache.Client, userID int64, currentToken string, enabled bool, secret, code, currentPassword string) (map[string]interface{}, error) {
 	if cfg == nil || !cfg.TwoFactorEnabled {
 		return nil, fmt.Errorf("%w: two-factor authentication is disabled", ErrForbidden)
 	}
@@ -115,6 +115,12 @@ func ConfigureTwoFactor(ctx context.Context, pool *sql.DB, cfg *config.Config, c
 		// secret here let a bare session token take over the second factor.
 		if currentEnabled && storedSecret != "" {
 			return nil, fmt.Errorf("%w: two-factor authentication is already enabled; disable the current authenticator first", ErrValidation)
+		}
+		// Turning the factor on also needs the owner, not only a session: a
+		// stolen session could otherwise bind its own authenticator and lock
+		// the owner out at the next sign-in.
+		if err := VerifyStepUp(ctx, pool, cfg, userID, currentPassword, ""); err != nil {
+			return nil, err
 		}
 		secret = normalizeTOTPSecret(secret)
 		if secret == "" {

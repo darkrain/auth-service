@@ -177,6 +177,9 @@ func main() {
 		})
 	}
 
+	// Secret columns never leave the generated account routes.
+	r.Use(authmodules.StripSecretFields())
+
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": Version})
 	})
