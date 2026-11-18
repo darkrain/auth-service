@@ -248,8 +248,9 @@ func TestSEC06RevocationRemovesPendingHandoffs(t *testing.T) {
 		if w := doRequestWithDevice("POST", "/auth/password/reset-request", map[string]string{"login": login, "device_uid": device}, "", device); w.Code != http.StatusOK {
 			t.Fatalf("reset-request: %d %s", w.Code, w.Body.String())
 		}
+		setKnownResetCode(t, login, device)
 		if w := doRequestWithDevice("POST", "/auth/password/reset-confirm", map[string]interface{}{
-			"login": login, "code": "777777", "device_uid": device, "new_password": "NewPass2",
+			"login": login, "code": knownResetCode, "device_uid": device, "new_password": "NewPass2",
 		}, "", device); w.Code != http.StatusOK {
 			t.Fatalf("reset-confirm: %d %s", w.Code, w.Body.String())
 		}
@@ -354,6 +355,7 @@ func TestSEC08ParallelResetAttemptsRespectLimit(t *testing.T) {
 	if w := doRequestWithDevice("POST", "/auth/password/reset-request", map[string]string{"login": login, "device_uid": device}, "", device); w.Code != http.StatusOK {
 		t.Fatalf("reset-request: %d %s", w.Code, w.Body.String())
 	}
+	setKnownResetCode(t, login, device)
 	max := testCfg.RateLimit.Code.MaxAttempts
 	workers := 2*max + 4
 	var wg sync.WaitGroup
@@ -391,7 +393,7 @@ func TestSEC08ParallelResetAttemptsRespectLimit(t *testing.T) {
 		t.Fatalf("every attempt over the limit must be refused as too many: %v", results)
 	}
 	// The right code is refused once the attempts are spent.
-	if err := service.ConfirmPasswordReset(context.Background(), testPool, testCfg, nil, login, "777777", device, "NewPass2"); !errors.Is(err, service.ErrTooManyCodeAttempts) {
+	if err := service.ConfirmPasswordReset(context.Background(), testPool, testCfg, nil, login, knownResetCode, device, "NewPass2"); !errors.Is(err, service.ErrTooManyCodeAttempts) {
 		t.Fatalf("right code after the limit: expected too many attempts, got %v", err)
 	}
 }
@@ -404,10 +406,11 @@ func TestSEC08RightResetCodeWithinLimitWorks(t *testing.T) {
 	if w := doRequestWithDevice("POST", "/auth/password/reset-request", map[string]string{"login": login, "device_uid": device}, "", device); w.Code != http.StatusOK {
 		t.Fatalf("reset-request: %d %s", w.Code, w.Body.String())
 	}
+	setKnownResetCode(t, login, device)
 	if err := service.ConfirmPasswordReset(context.Background(), testPool, testCfg, nil, login, "000000", device, "NewPass2"); !errors.Is(err, service.ErrInvalidCode) {
 		t.Fatalf("wrong code: expected invalid, got %v", err)
 	}
-	if err := service.ConfirmPasswordReset(context.Background(), testPool, testCfg, nil, login, "777777", device, "NewPass2"); err != nil {
+	if err := service.ConfirmPasswordReset(context.Background(), testPool, testCfg, nil, login, knownResetCode, device, "NewPass2"); err != nil {
 		t.Fatalf("right code within the limit: %v", err)
 	}
 	loginUser(t, login, "NewPass2")
