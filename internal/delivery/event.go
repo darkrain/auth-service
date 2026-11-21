@@ -62,6 +62,9 @@ type CodeRequest struct {
 	DeviceUID        string
 	SelectedProvider string
 	AllowFallback    bool
+	// Locale is the language of the message (see RequestLocale); empty leaves
+	// the choice to message-delivery's default locale.
+	Locale string
 }
 
 func NewCodeEvent(cfg *config.Config, req CodeRequest) (*RequestEvent, error) {
@@ -85,7 +88,7 @@ func NewCodeEvent(cfg *config.Config, req CodeRequest) (*RequestEvent, error) {
 		Variables: map[string]string{"code": req.Code, "ttl_sec": fmt.Sprintf("%d", req.TTLSec)},
 		UserID:    req.UserID, CreatedAt: time.Now().UTC(),
 		Delivery: DeliveryPolicy{SelectedProvider: req.SelectedProvider, ProviderChain: cfg.CodeProviderChain(req.RecipientType), AllowFallback: allowFallback},
-		Metadata: map[string]string{"device_uid": req.DeviceUID, "brand": cfg.RegistrationBrand},
+		Metadata: withLocale(map[string]string{"device_uid": req.DeviceUID, "brand": cfg.RegistrationBrand}, req.Locale),
 	}, nil
 }
 
@@ -98,6 +101,7 @@ type NoticeRequest struct {
 	Recipient     string
 	Variables     map[string]string
 	UserID        int64
+	Locale        string
 }
 
 func NewNoticeEvent(cfg *config.Config, req NoticeRequest) (*RequestEvent, error) {
@@ -117,8 +121,17 @@ func NewNoticeEvent(cfg *config.Config, req NoticeRequest) (*RequestEvent, error
 		Template: req.Template, Purpose: req.Purpose, RecipientType: req.RecipientType, Recipient: req.Recipient,
 		Variables: variables, UserID: req.UserID, CreatedAt: time.Now().UTC(),
 		Delivery: DeliveryPolicy{ProviderChain: cfg.CodeProviderChain(req.RecipientType), AllowFallback: true},
-		Metadata: map[string]string{"brand": cfg.RegistrationBrand},
+		Metadata: withLocale(map[string]string{"brand": cfg.RegistrationBrand}, req.Locale),
 	}, nil
+}
+
+// withLocale adds metadata.locale, which message-delivery reads to pick the
+// template language, unless locale is empty.
+func withLocale(metadata map[string]string, locale string) map[string]string {
+	if locale != "" {
+		metadata["locale"] = locale
+	}
+	return metadata
 }
 
 func randomID() (string, error) {

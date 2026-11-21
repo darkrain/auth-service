@@ -210,6 +210,7 @@ type RegisterRequest struct {
 	DeviceUID     string
 	Provider      string
 	AllowFallback bool
+	Locale        string
 }
 
 // RegisterResult holds the result of a successful registration.
@@ -353,7 +354,7 @@ func Register(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cf
 	verificationID, err := CreateContactVerification(ctx, pool, conn, cfg, ContactVerificationRequest{
 		UserID: userID, ContactType: contactType, Recipient: req.Login,
 		DeviceUID: req.DeviceUID, Provider: req.Provider, AllowFallback: req.AllowFallback,
-		Purpose: delivery.PurposeRegistrationVerification,
+		Purpose: delivery.PurposeRegistrationVerification, Locale: req.Locale,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("send registration verification code: %w", err)

@@ -192,26 +192,20 @@ func truncateTables(t *testing.T) {
 
 // doRequest makes an HTTP request to testRouter and returns the ResponseRecorder.
 func doRequest(method, path string, body interface{}, token string) *httptest.ResponseRecorder {
-	var req *http.Request
-	if body != nil {
-		b, _ := json.Marshal(body)
-		req, _ = http.NewRequest(method, path, bytes.NewReader(b))
-		req.Header.Set("Content-Type", "application/json")
-	} else {
-		req, _ = http.NewRequest(method, path, nil)
-	}
-
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	w := httptest.NewRecorder()
-	testRouter.ServeHTTP(w, req)
-	return w
+	return doRequestWithHeaders(method, path, body, token, nil)
 }
 
 // doRequestWithDevice makes an HTTP request with X-Device-ID header.
 func doRequestWithDevice(method, path string, body interface{}, token, deviceUID string) *httptest.ResponseRecorder {
+	headers := map[string]string{}
+	if deviceUID != "" {
+		headers["X-Device-ID"] = deviceUID
+	}
+	return doRequestWithHeaders(method, path, body, token, headers)
+}
+
+// doRequestWithHeaders makes an HTTP request with extra headers.
+func doRequestWithHeaders(method, path string, body interface{}, token string, headers map[string]string) *httptest.ResponseRecorder {
 	var req *http.Request
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -224,8 +218,8 @@ func doRequestWithDevice(method, path string, body interface{}, token, deviceUID
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if deviceUID != "" {
-		req.Header.Set("X-Device-ID", deviceUID)
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 
 	w := httptest.NewRecorder()

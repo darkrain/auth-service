@@ -9,6 +9,7 @@ import (
 	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -16,6 +17,7 @@ import (
 type resetRequestBody struct {
 	Login     string `json:"login"      example:"user@example.com"`
 	DeviceUID string `json:"device_uid" example:"device-uuid-1234"`
+	Locale    string `json:"locale,omitempty" example:"ru"`
 }
 
 type resetConfirmBody struct {
@@ -32,6 +34,7 @@ type resetConfirmBody struct {
 //	@Tags			password-reset
 //	@Accept			json
 //	@Produce		json
+//	@Param			Accept-Language	header	string	false	"Language of the code message when the body has no locale, e.g. ru"
 //	@Param			request	body		resetRequestBody	true	"Login and device UID"
 //	@Success		200		{object}	messageResponse
 //	@Failure		400		{object}	errorResponse
@@ -62,7 +65,8 @@ func ResetRequest(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config,
 		}
 
 		// Always return 200 regardless of result (no user enumeration)
-		_ = service.RequestPasswordReset(c.Request.Context(), pool, conn, cfg, cacheClient, req.Login, req.DeviceUID, ip)
+		_ = service.RequestPasswordReset(c.Request.Context(), pool, conn, cfg, cacheClient, req.Login, req.DeviceUID, ip,
+			delivery.RequestLocale(req.Locale, c.GetHeader("Accept-Language"), cfg.CodeDelivery.Locales))
 
 		c.JSON(http.StatusOK, gin.H{"message": "If an account with that login exists, a reset code has been sent."})
 	}

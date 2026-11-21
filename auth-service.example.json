@@ -31,7 +31,8 @@
       "DefaultProviderChain": ["telegram", "whatsapp", "sms"],
       "AllowedProviders": ["telegram", "whatsapp", "sms"]
     },
-    "PublishTestAccountCodes": false
+    "PublishTestAccountCodes": false,
+    "Locales": ["en", "ru"]
   },
   "SessionTTLDays": 30,
   "RegistrationTokenTTLMin": 30,

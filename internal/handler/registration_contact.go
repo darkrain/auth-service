@@ -20,6 +20,7 @@ type registrationContactRequest struct {
 	DeviceUID     string `json:"device_uid" example:"device-uuid-1234"`
 	Provider      string `json:"provider,omitempty" example:"email"`
 	AllowFallback bool   `json:"allow_fallback"`
+	Locale        string `json:"locale,omitempty" example:"ru"`
 }
 
 type registrationContactResponse struct {
@@ -37,6 +38,7 @@ type registrationContactResponse struct {
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
+//	@Param			Accept-Language	header	string	false	"Language of the code message when the body has no locale, e.g. ru"
 //	@Param			request	body	registrationContactRequest	true	"New registration contact"
 //	@Success		200	{object}	registrationContactResponse
 //	@Failure		400	{object}	errorResponse
@@ -70,6 +72,7 @@ func ChangeRegistrationContact(pool *sql.DB, conn broker.ChannelProvider, cfg *c
 		result, err := service.ChangeRegistrationContact(c.Request.Context(), pool, conn, cfg, service.ContactVerificationRequest{
 			UserID: userID, ContactType: contactType, Recipient: req.Login, DeviceUID: req.DeviceUID,
 			Provider: req.Provider, AllowFallback: req.AllowFallback, Purpose: delivery.PurposeRegistrationVerification,
+			Locale: delivery.RequestLocale(req.Locale, c.GetHeader("Accept-Language"), cfg.CodeDelivery.Locales),
 		})
 		if err != nil {
 			switch {

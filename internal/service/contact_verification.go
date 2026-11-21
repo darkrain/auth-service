@@ -99,6 +99,8 @@ type ContactVerificationRequest struct {
 	Provider      string
 	AllowFallback bool
 	Purpose       string
+	// Locale is the language of the code message (delivery.RequestLocale).
+	Locale string
 }
 
 // PreparedContactVerification contains server-generated data that must never
@@ -263,7 +265,7 @@ func PublishContactVerification(ctx context.Context, conn broker.ChannelProvider
 	if verification.ContactType == "phone" {
 		recipientType = delivery.RecipientTypePhone
 	}
-	return delivery.NewPublisher(conn, cfg).PublishCode(ctx, delivery.CodeRequest{
+	return delivery.NewEventPublisher(conn, cfg).PublishCode(ctx, delivery.CodeRequest{
 		Template:         delivery.TemplateAuthVerificationCode,
 		Purpose:          verification.Purpose,
 		RecipientType:    recipientType,
@@ -274,6 +276,7 @@ func PublishContactVerification(ctx context.Context, conn broker.ChannelProvider
 		DeviceUID:        verification.DeviceUID,
 		SelectedProvider: verification.Provider,
 		AllowFallback:    verification.AllowFallback,
+		Locale:           verification.Locale,
 	})
 }
 
@@ -500,7 +503,7 @@ func ContactChangeNotice(userID int64, change *ContactChange) (delivery.NoticeRe
 
 // PublishContactChangeNotice sends the warning built by ContactChangeNotice.
 func PublishContactChangeNotice(ctx context.Context, conn broker.ChannelProvider, cfg *config.Config, notice delivery.NoticeRequest) error {
-	return delivery.NewPublisher(conn, cfg).PublishNotice(ctx, notice)
+	return delivery.NewEventPublisher(conn, cfg).PublishNotice(ctx, notice)
 }
 
 // MaskContact keeps enough of an address to recognise it and hides the rest:

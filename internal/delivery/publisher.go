@@ -27,6 +27,12 @@ type AMQPPublisher struct {
 	config     *config.Config
 }
 
+// NewEventPublisher builds the publisher the services send their events with.
+// Tests replace it to record the events without a broker.
+var NewEventPublisher = func(connection broker.ChannelProvider, cfg *config.Config) Publisher {
+	return NewPublisher(connection, cfg)
+}
+
 func NewPublisher(connection broker.ChannelProvider, cfg *config.Config) *AMQPPublisher {
 	return &AMQPPublisher{connection: connection, config: cfg}
 }

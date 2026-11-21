@@ -50,14 +50,15 @@ const authTypePasswordReset = "password_reset"
 
 // RequestPasswordReset sends a password reset code to the user.
 // Always returns nil regardless of whether the user exists (no enumeration).
-// Rate-limited per IP and per login via Redis.
+// Rate-limited per IP and per login via Redis. locale is the language of the
+// message (delivery.RequestLocale), "" for message-delivery's default.
 func RequestPasswordReset(
 	ctx context.Context,
 	pool *sql.DB,
 	conn broker.ChannelProvider,
 	cfg *config.Config,
 	cacheClient *cache.Client,
-	login, deviceUID, ip string,
+	login, deviceUID, ip, locale string,
 ) error {
 	login = strings.TrimSpace(login)
 	if login == "" {
@@ -146,10 +147,10 @@ func RequestPasswordReset(
 	if isEmail {
 		recipientType = delivery.RecipientTypeEmail
 	}
-	return delivery.NewPublisher(conn, cfg).PublishCode(ctx, delivery.CodeRequest{
+	return delivery.NewEventPublisher(conn, cfg).PublishCode(ctx, delivery.CodeRequest{
 		Template: delivery.TemplateAuthPasswordReset, Purpose: delivery.PurposePasswordReset,
 		RecipientType: recipientType, Recipient: login, Code: code, TTLSec: ttlSec,
-		UserID: userID, DeviceUID: deviceUID, AllowFallback: true,
+		UserID: userID, DeviceUID: deviceUID, AllowFallback: true, Locale: locale,
 	})
 }
 

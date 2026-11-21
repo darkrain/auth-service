@@ -22,6 +22,88 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/admin/users/{id}/block": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "{\"block\":true} bans the account and revokes all its sessions and API keys; {\"block\":false} restores the status recorded before the latest administrative block. Requires admin or sudo role.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Block or unblock a customer account",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Block or unblock",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.accountBlockRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.AccountBlockResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/api-keys": {
             "get": {
                 "security": [
@@ -427,6 +509,12 @@ const docTemplate = `{
                 "summary": "Request password reset code",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "Language of the code message when the body has no locale, e.g. ru",
+                        "name": "Accept-Language",
+                        "in": "header"
+                    },
+                    {
                         "description": "Login and device UID",
                         "name": "request",
                         "in": "body",
@@ -460,7 +548,7 @@ const docTemplate = `{
         },
         "/auth/register": {
             "post": {
-                "description": "Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls.",
+                "description": "Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls. The verification code message is written in the body's locale, else in the language of Accept-Language.",
                 "consumes": [
                     "application/json"
                 ],
@@ -472,6 +560,12 @@ const docTemplate = `{
                 ],
                 "summary": "Register a new user",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Language of the code message, e.g. ru",
+                        "name": "Accept-Language",
+                        "in": "header"
+                    },
                     {
                         "description": "Registration data",
                         "name": "request",
@@ -524,6 +618,12 @@ const docTemplate = `{
                 "summary": "Change the contact of an unfinished registration",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "Language of the code message when the body has no locale, e.g. ru",
+                        "name": "Accept-Language",
+                        "in": "header"
+                    },
+                    {
                         "description": "New registration contact",
                         "name": "request",
                         "in": "body",
@@ -563,6 +663,15 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "handler.accountBlockRequest": {
+            "type": "object",
+            "properties": {
+                "block": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
         "handler.apiKeyResponse": {
             "type": "object",
             "properties": {
@@ -680,6 +789,11 @@ const docTemplate = `{
                     "type": "string",
                     "example": "device-uuid-1234"
                 },
+                "locale": {
+                    "description": "Locale is the language of the verification code message; without it\nthe Accept-Language header decides.",
+                    "type": "string",
+                    "example": "ru"
+                },
                 "login": {
                     "type": "string",
                     "example": "user@example.com"
@@ -732,6 +846,10 @@ const docTemplate = `{
                 "device_uid": {
                     "type": "string",
                     "example": "device-uuid-1234"
+                },
+                "locale": {
+                    "type": "string",
+                    "example": "ru"
                 },
                 "login": {
                     "type": "string",
@@ -791,6 +909,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "device-uuid-1234"
                 },
+                "locale": {
+                    "type": "string",
+                    "example": "ru"
+                },
                 "login": {
                     "type": "string",
                     "example": "user@example.com"
@@ -811,6 +933,23 @@ const docTemplate = `{
                 "device_uid": {
                     "type": "string",
                     "example": "device-uuid-1234"
+                }
+            }
+        },
+        "service.AccountBlockResult": {
+            "type": "object",
+            "properties": {
+                "blocked": {
+                    "type": "boolean"
+                },
+                "changed": {
+                    "type": "boolean"
+                },
+                "user_id": {
+                    "type": "integer"
+                },
+                "verify_status": {
+                    "type": "string"
                 }
             }
         }

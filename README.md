@@ -65,6 +65,18 @@ cp auth-service.example.json auth-service.json
 email uses its default provider; a phone falls through `telegram`, `whatsapp`,
 then `sms` unless the caller explicitly selects a permitted provider.
 
+Code messages (registration, registration contact change, contact
+verification, password reset) and the contact-change notice are written in the
+requester's language. auth-service puts it into the delivery event as
+`metadata.locale`, which message-delivery uses to pick the template language.
+The language is an optional `locale` field of the request body (`"ru"`), else
+the most preferred language of the `Accept-Language` header (q-values are
+honoured, `ru-RU` becomes `ru`). Only the primary language subtag is sent;
+values that are not language tags are ignored. `CodeDelivery.Locales`
+(`["en", "ru", "zh"]`) optionally limits the accepted languages; empty accepts
+any. Without a language the event has no `metadata.locale` and message-delivery
+uses its default locale.
+
 To enable TOTP two-factor authentication, set `TwoFactorEnabled` and supply a
 stable base64-encoded 32-byte encryption key. The key encrypts TOTP secrets at
 rest and must be backed up with the database: changing it makes existing 2FA

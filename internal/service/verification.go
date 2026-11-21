@@ -28,7 +28,8 @@ var ErrForbiddenRecipient = errors.New("recipient does not belong to authenticat
 // SendCode generates a 6-digit verification code and publishes it to RabbitMQ.
 // Rate-limited: if an existing code's TTL hasn't expired, returns ErrTooManyRequests.
 // userID is the authenticated user's ID; recipient must match their email or phone.
-func SendCode(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config, recipient, deviceUID, provider string, allowFallback bool, userID int64) error {
+// locale is the language of the message (delivery.RequestLocale), "" for the default.
+func SendCode(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config, recipient, deviceUID, provider string, allowFallback bool, userID int64, locale string) error {
 	recipient = strings.TrimSpace(recipient)
 	if recipient == "" {
 		return fmt.Errorf("%w: recipient is required", ErrValidation)
@@ -148,9 +149,10 @@ func SendCode(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cf
 	if testCode != "" && !cfg.CodeDelivery.PublishTestAccountCodes {
 		return nil
 	}
-	return delivery.NewPublisher(conn, cfg).PublishCode(ctx, delivery.CodeRequest{
+	return delivery.NewEventPublisher(conn, cfg).PublishCode(ctx, delivery.CodeRequest{
 		Template: delivery.TemplateAuthVerificationCode, Purpose: delivery.PurposeVerification,
 		RecipientType: recipientType, Recipient: recipient, Code: code, TTLSec: cfg.RateLimit.Code.TTLSec,
 		UserID: recipientUserID, DeviceUID: deviceUID, SelectedProvider: provider, AllowFallback: allowFallback,
+		Locale: locale,
 	})
 }
