@@ -68,6 +68,9 @@ type CodeDeliveryConfig struct {
 	Email                   CodeDeliveryEmailConfig `json:"Email"`
 	Phone                   CodeDeliveryPhoneConfig `json:"Phone"`
 	PublishTestAccountCodes bool                    `json:"PublishTestAccountCodes"`
+	// Locales lists the languages a request may ask its code messages in
+	// ("en", "ru", ...). Empty accepts any language tag.
+	Locales []string `json:"Locales"`
 }
 
 type CodeDeliveryEmailConfig struct {

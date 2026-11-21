@@ -131,7 +131,7 @@ func requestContactVerification(pool *sql.DB, conn broker.ChannelProvider, cache
 		request := service.ContactVerificationRequest{
 			UserID: userID, ContactType: inputString(input, "contact_type"), Recipient: inputString(input, "recipient"),
 			DeviceUID: inputString(input, "device_uid"), Provider: inputString(input, "provider"), AllowFallback: fallback,
-			Purpose: "verification",
+			Purpose: "verification", Locale: requestLocale(c, cfg, input),
 		}
 		// Every request sends an e-mail or a paid phone message, so it has the
 		// same IP and device limits as the other routes that send codes.
@@ -233,6 +233,7 @@ func confirmContactVerification(pool *sql.DB, conn broker.ChannelProvider, cache
 			}
 		}
 		if notice, ok := service.ContactChangeNotice(userID, change); ok {
+			notice.Locale = requestLocale(c, cfg, input)
 			if err := service.PublishContactChangeNotice(ctx, conn, cfg, notice); err != nil {
 				log.Printf("contact change notice for user %d: %v", userID, err)
 			}
@@ -242,6 +243,12 @@ func confirmContactVerification(pool *sql.DB, conn broker.ChannelProvider, cache
 		}
 		return replaceBody(c, map[string]interface{}{"status": "confirmed", "confirmed_at": time.Now().UTC().Format(time.RFC3339Nano)})
 	}
+}
+
+// requestLocale is the language of the message a request triggers: the body's
+// "locale", else the Accept-Language header.
+func requestLocale(c *gin.Context, cfg *config.Config, input map[string]interface{}) string {
+	return delivery.RequestLocale(inputString(input, "locale"), c.GetHeader("Accept-Language"), cfg.CodeDelivery.Locales)
 }
 
 func firstNonEmpty(values ...string) string {

@@ -1,5 +1,11 @@
 basePath: /
 definitions:
+  handler.accountBlockRequest:
+    properties:
+      block:
+        example: true
+        type: boolean
+    type: object
   handler.apiKeyResponse:
     properties:
       created_at:
@@ -82,6 +88,12 @@ definitions:
       device_uid:
         example: device-uuid-1234
         type: string
+      locale:
+        description: |-
+          Locale is the language of the verification code message; without it
+          the Accept-Language header decides.
+        example: ru
+        type: string
       login:
         example: user@example.com
         type: string
@@ -119,6 +131,9 @@ definitions:
         type: boolean
       device_uid:
         example: device-uuid-1234
+        type: string
+      locale:
+        example: ru
         type: string
       login:
         example: corrected@example.com
@@ -161,6 +176,9 @@ definitions:
       device_uid:
         example: device-uuid-1234
         type: string
+      locale:
+        example: ru
+        type: string
       login:
         example: user@example.com
         type: string
@@ -177,6 +195,17 @@ definitions:
         example: device-uuid-1234
         type: string
     type: object
+  service.AccountBlockResult:
+    properties:
+      blocked:
+        type: boolean
+      changed:
+        type: boolean
+      user_id:
+        type: integer
+      verify_status:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact:
@@ -190,6 +219,61 @@ info:
   title: Auth Service API
   version: "1.0"
 paths:
+  /admin/users/{id}/block:
+    post:
+      consumes:
+      - application/json
+      description: '{"block":true} bans the account and revokes all its sessions and
+        API keys; {"block":false} restores the status recorded before the latest administrative
+        block. Requires admin or sudo role.'
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Block or unblock
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handler.accountBlockRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.AccountBlockResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handler.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Block or unblock a customer account
+      tags:
+      - admin
   /auth/api-keys:
     get:
       description: Returns all API keys belonging to the authenticated user. Requires
@@ -455,6 +539,11 @@ paths:
       description: Sends a one-time password reset code to the user's email or phone.
         Always returns 200 to avoid user enumeration.
       parameters:
+      - description: Language of the code message when the body has no locale, e.g.
+          ru
+        in: header
+        name: Accept-Language
+        type: string
       - description: Login and device UID
         in: body
         name: request
@@ -485,8 +574,13 @@ paths:
       - application/json
       description: Creates a new user account. Login can be an email address or a
         phone number. Returns a short-lived registration_token to authenticate verification
-        calls.
+        calls. The verification code message is written in the body's locale, else
+        in the language of Accept-Language.
       parameters:
+      - description: Language of the code message, e.g. ru
+        in: header
+        name: Accept-Language
+        type: string
       - description: Registration data
         in: body
         name: request
@@ -518,6 +612,11 @@ paths:
       description: Replaces the email or phone on the existing registered user, invalidates
         older registration codes and sends a new code. Requires a registration token.
       parameters:
+      - description: Language of the code message when the body has no locale, e.g.
+          ru
+        in: header
+        name: Accept-Language
+        type: string
       - description: New registration contact
         in: body
         name: request

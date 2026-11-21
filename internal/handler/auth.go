@@ -10,6 +10,7 @@ import (
 	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
+	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -38,6 +39,9 @@ type registerRequest struct {
 	DeviceUID     string `json:"device_uid" example:"device-uuid-1234"`
 	Provider      string `json:"provider,omitempty" example:"telegram"`
 	AllowFallback bool   `json:"allow_fallback"`
+	// Locale is the language of the verification code message; without it
+	// the Accept-Language header decides.
+	Locale string `json:"locale,omitempty" example:"ru"`
 }
 
 type messageResponse struct {
@@ -216,10 +220,11 @@ func Me() gin.HandlerFunc {
 // Register handles POST /auth/register
 //
 //	@Summary		Register a new user
-//	@Description	Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls.
+//	@Description	Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls. The verification code message is written in the body's locale, else in the language of Accept-Language.
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
+//	@Param			Accept-Language	header	string	false	"Language of the code message, e.g. ru"
 //	@Param			request	body		registerRequest	true	"Registration data"
 //	@Success		201		{object}	registerResponse
 //	@Failure		400		{object}	errorResponse
@@ -245,6 +250,7 @@ func Register(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config) gin
 		result, err := service.Register(c.Request.Context(), pool, conn, cfg, service.RegisterRequest{
 			Login: req.Login, Password: req.Password, Role: req.Role, DeviceUID: req.DeviceUID,
 			Provider: req.Provider, AllowFallback: req.AllowFallback,
+			Locale: delivery.RequestLocale(req.Locale, c.GetHeader("Accept-Language"), cfg.CodeDelivery.Locales),
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidEmail) {
