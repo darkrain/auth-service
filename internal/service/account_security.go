@@ -169,10 +169,13 @@ func ConfigureTwoFactor(ctx context.Context, pool *sql.DB, cfg *config.Config, c
 }
 
 func ChangePassword(ctx context.Context, pool *sql.DB, cfg *config.Config, cacheClient *cache.Client, userID int64, currentToken, currentPassword, newPassword, confirmation, twoFactorCode string) (map[string]interface{}, error) {
+	// Trimmed as at registration, reset and sign-in, which trims the password
+	// it checks.
+	newPassword, confirmation = strings.TrimSpace(newPassword), strings.TrimSpace(confirmation)
 	if newPassword != confirmation {
 		return nil, fmt.Errorf("%w: password confirmation does not match", ErrValidation)
 	}
-	if err := validatePassword(newPassword, cfg); err != nil {
+	if err := ValidatePassword(newPassword, cfg); err != nil {
 		return nil, err
 	}
 	if pool == nil {

@@ -193,7 +193,8 @@ func TestPasswordReset_NonExistentUser(t *testing.T) {
 	}
 }
 
-// TestPasswordReset_WeakPassword tests that a weak new password returns 400 ERR_WEAK_PASSWORD.
+// TestPasswordReset_WeakPassword tests that a too short new password returns
+// 400 ERR_PASSWORD_TOO_SHORT, as registration does.
 func TestPasswordReset_WeakPassword(t *testing.T) {
 	truncateTables(t)
 
@@ -225,8 +226,8 @@ func TestPasswordReset_WeakPassword(t *testing.T) {
 		t.Fatalf("weak password: expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 	body := parseJSON(w)
-	if body["code"] != "ERR_WEAK_PASSWORD" {
-		t.Errorf("expected ERR_WEAK_PASSWORD, got %v", body["code"])
+	if body["code"] != "ERR_PASSWORD_TOO_SHORT" {
+		t.Errorf("expected ERR_PASSWORD_TOO_SHORT, got %v", body["code"])
 	}
 }
 

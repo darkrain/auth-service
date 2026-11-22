@@ -113,8 +113,9 @@ func ResetConfirm(pool *sql.DB, cfg *config.Config, cacheClient *cache.Client) g
 				c.JSON(http.StatusBadRequest, errResp(CodeInvalidCode, "invalid reset code"))
 			case errors.Is(err, service.ErrTooManyCodeAttempts):
 				c.JSON(http.StatusTooManyRequests, errResp(CodeTooManyRequests, "too many attempts, request a new reset code"))
-			case errors.Is(err, service.ErrWeakPassword):
-				c.JSON(http.StatusBadRequest, errResp(CodeWeakPassword, strings.TrimPrefix(err.Error(), "validation error: ")))
+			case service.PasswordPolicyRule(err) != "":
+				response, _ := passwordPolicyError(err)
+				c.JSON(http.StatusBadRequest, response)
 			case errors.Is(err, service.ErrValidation):
 				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
 			default:

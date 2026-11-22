@@ -3,7 +3,7 @@
   "Port": "8080",
   "PasswordSalt": "changeme_random_secret",
   "PasswordMinLength": 8,
-  "PasswordRequireDigits": true,
+  "PasswordRequireDigits": false,
   "PasswordRequireSpecial": false,
   "SystemUserEmail": "system@auth.internal",
   "SystemUserPassword": "changeme_system_password",
