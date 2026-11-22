@@ -10,9 +10,9 @@ import (
 func TestRequestLocale(t *testing.T) {
 	supported := []string{"en", "ru", "zh"}
 	for _, tc := range []struct {
-		name, explicit, header string
-		allowed                []string
-		want                   string
+		name, explicit, query, header string
+		allowed                       []string
+		want                          string
 	}{
 		{name: "nothing", want: ""},
 		{name: "plain header", header: "ru", want: "ru"},
@@ -33,11 +33,20 @@ func TestRequestLocale(t *testing.T) {
 		{name: "allowlist rejects explicit", explicit: "fr", header: "zh", allowed: supported, want: "zh"},
 		{name: "allowlist case", header: "RU", allowed: []string{" Ru "}, want: "ru"},
 		{name: "any tag without allowlist", header: "fr-CA", want: "fr"},
+		{name: "query beats header", query: "ru", header: "en-US,en;q=0.9", want: "ru"},
+		{name: "explicit beats query", explicit: "zh", query: "ru", header: "en", want: "zh"},
+		{name: "query without header", query: "en", want: "en"},
+		{name: "query region and case", query: "RU-ru", header: "en", want: "ru"},
+		{name: "garbage query falls back", query: "ru,en", header: "zh", want: "zh"},
+		{name: "allowlist rejects query", query: "fr", header: "en", allowed: supported, want: "en"},
+		{name: "allowlist rejects explicit uses query", explicit: "de", query: "ru", header: "en", allowed: supported, want: "ru"},
+		{name: "query is one tag not a list", query: "fr;q=1", header: "ru", allowed: supported, want: "ru"},
+		{name: "too long query", query: "en-" + strings.Repeat("x", 40), header: "ru", want: "ru"},
 		{name: "too long tag", explicit: "ru-" + strings.Repeat("x", 40), want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := RequestLocale(tc.explicit, tc.header, tc.allowed); got != tc.want {
-				t.Fatalf("RequestLocale(%q, %q, %v) = %q, want %q", tc.explicit, tc.header, tc.allowed, got, tc.want)
+			if got := RequestLocale(tc.explicit, tc.query, tc.header, tc.allowed); got != tc.want {
+				t.Fatalf("RequestLocale(%q, %q, %q, %v) = %q, want %q", tc.explicit, tc.query, tc.header, tc.allowed, got, tc.want)
 			}
 		})
 	}
@@ -45,7 +54,7 @@ func TestRequestLocale(t *testing.T) {
 
 func TestRequestLocaleBoundsHeader(t *testing.T) {
 	header := strings.Repeat("xx-invalid1, ", maxAcceptLanguageEntries) + "ru"
-	if got := RequestLocale("", header, []string{"ru"}); got != "" {
+	if got := RequestLocale("", "", header, []string{"ru"}); got != "" {
 		t.Fatalf("entries past the limit must be ignored, got %q", got)
 	}
 }

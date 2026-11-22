@@ -246,9 +246,10 @@ func confirmContactVerification(pool *sql.DB, conn broker.ChannelProvider, cache
 }
 
 // requestLocale is the language of the message a request triggers: the body's
-// "locale", else the Accept-Language header.
+// "locale", else the "lang" query parameter, else the Accept-Language header
+// (handler.CodeLocale).
 func requestLocale(c *gin.Context, cfg *config.Config, input map[string]interface{}) string {
-	return delivery.RequestLocale(inputString(input, "locale"), c.GetHeader("Accept-Language"), cfg.CodeDelivery.Locales)
+	return handler.CodeLocale(c, cfg, inputString(input, "locale"))
 }
 
 func firstNonEmpty(values ...string) string {
