@@ -510,7 +510,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Language of the code message when the body has no locale, e.g. ru",
+                        "description": "Language chosen in the client app, e.g. ru; used when the body has no locale, before Accept-Language",
+                        "name": "lang",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Language of the code message when neither the body locale nor lang is given, e.g. ru",
                         "name": "Accept-Language",
                         "in": "header"
                     },
@@ -548,7 +554,7 @@ const docTemplate = `{
         },
         "/auth/register": {
             "post": {
-                "description": "Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls. The verification code message is written in the body's locale, else in the language of Accept-Language.",
+                "description": "Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls. The verification code message is written in the body's locale, else in the lang query parameter, else in the language of Accept-Language.",
                 "consumes": [
                     "application/json"
                 ],
@@ -562,7 +568,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Language of the code message, e.g. ru",
+                        "description": "Language chosen in the client app, e.g. ru; used when the body has no locale, before Accept-Language",
+                        "name": "lang",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Language of the code message when neither the body locale nor lang is given, e.g. ru",
                         "name": "Accept-Language",
                         "in": "header"
                     },
@@ -619,7 +631,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Language of the code message when the body has no locale, e.g. ru",
+                        "description": "Language chosen in the client app, e.g. ru; used when the body has no locale, before Accept-Language",
+                        "name": "lang",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Language of the code message when neither the body locale nor lang is given, e.g. ru",
                         "name": "Accept-Language",
                         "in": "header"
                     },
@@ -790,7 +808,7 @@ const docTemplate = `{
                     "example": "device-uuid-1234"
                 },
                 "locale": {
-                    "description": "Locale is the language of the verification code message; without it\nthe Accept-Language header decides.",
+                    "description": "Locale is the language of the verification code message; without it\nthe lang query parameter, then the Accept-Language header decides.",
                     "type": "string",
                     "example": "ru"
                 },

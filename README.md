@@ -69,13 +69,17 @@ Code messages (registration, registration contact change, contact
 verification, password reset) and the contact-change notice are written in the
 requester's language. auth-service puts it into the delivery event as
 `metadata.locale`, which message-delivery uses to pick the template language.
-The language is an optional `locale` field of the request body (`"ru"`), else
-the most preferred language of the `Accept-Language` header (q-values are
-honoured, `ru-RU` becomes `ru`). Only the primary language subtag is sent;
-values that are not language tags are ignored. `CodeDelivery.Locales`
-(`["en", "ru", "zh"]`) optionally limits the accepted languages; empty accepts
-any. Without a language the event has no `metadata.locale` and message-delivery
-uses its default locale.
+The language is taken, in this order, from an optional `locale` field of the
+request body (`"ru"`), the `lang` query parameter (`?lang=ru`, the language the
+user chose in the client app), then the most preferred language of the
+`Accept-Language` header (q-values are honoured, `ru-RU` becomes `ru`). A
+browser sends `Accept-Language` on its own, so an explicit `locale` or `lang`
+always wins over it. Only the primary language subtag is sent; a `locale` or
+`lang` that is not a language tag, or not an accepted language, is ignored and
+the next source decides. `CodeDelivery.Locales` (`["en", "ru", "zh"]`)
+optionally limits the accepted languages; empty accepts any. Without a language
+the event has no `metadata.locale` and message-delivery uses its default
+locale.
 
 To enable TOTP two-factor authentication, set `TwoFactorEnabled` and supply a
 stable base64-encoded 32-byte encryption key. The key encrypts TOTP secrets at

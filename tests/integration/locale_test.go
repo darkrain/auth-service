@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strconv"
 	"testing"
 
@@ -60,6 +61,15 @@ func (r *eventRecorder) expectLocale(t *testing.T, template, want string) {
 
 func lang(value string) map[string]string { return map[string]string{"Accept-Language": value} }
 
+// langQuery is the "?lang=" query the webapp adds to every auth request, or ""
+// without a language.
+func langQuery(value string) string {
+	if value == "" {
+		return ""
+	}
+	return "?lang=" + url.QueryEscape(value)
+}
+
 func TestRegistrationCodeLocale(t *testing.T) {
 	truncateTables(t)
 	recorder := recordDeliveryEvents(t)
@@ -70,10 +80,16 @@ func TestRegistrationCodeLocale(t *testing.T) {
 	for i, tc := range []struct {
 		name    string
 		headers map[string]string
+		query   string
 		body    string
 		want    string
 	}{
 		{name: "browser header", headers: lang("ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"), want: "ru"},
+		{name: "query lang beats header", headers: lang("en-US,en;q=0.9"), query: "ru", want: "ru"},
+		{name: "body beats query lang", headers: lang("en"), query: "ru", body: "zh", want: "zh"},
+		{name: "query lang without header", query: "en", want: "en"},
+		{name: "unsupported query lang falls back to header", headers: lang("ru-RU"), query: "fr", want: "ru"},
+		{name: "invalid query lang falls back to header", headers: lang("zh"), query: "<b>", want: "zh"},
 		{name: "q-values", headers: lang("en;q=0.2, zh-CN;q=0.9"), want: "zh"},
 		{name: "body wins", headers: lang("ru"), body: "zh", want: "zh"},
 		{name: "body without header", body: "en", want: "en"},
@@ -88,7 +104,7 @@ func TestRegistrationCodeLocale(t *testing.T) {
 			if tc.body != "" {
 				request["locale"] = tc.body
 			}
-			w := doRequestWithHeaders("POST", "/auth/register", request, "", tc.headers)
+			w := doRequestWithHeaders("POST", "/auth/register"+langQuery(tc.query), request, "", tc.headers)
 			if w.Code != http.StatusCreated {
 				t.Fatalf("register: expected 201, got %d: %s", w.Code, w.Body.String())
 			}
@@ -119,6 +135,16 @@ func TestRegistrationContactChangeCodeLocale(t *testing.T) {
 	if last := recorder.events[len(recorder.events)-1]; last.Recipient != "locale-fixed@example.com" {
 		t.Fatalf("code must go to the new contact, got %q", last.Recipient)
 	}
+
+	// The webapp's ?lang= wins over the browser's Accept-Language.
+	recorder.events = nil
+	changed = doRequestWithHeaders("PUT", "/auth/registration/contact"+langQuery("ru"), map[string]interface{}{
+		"login": "locale-final@example.com", "device_uid": "locale-change", "allow_fallback": true,
+	}, registrationToken, lang("en-US,en;q=0.9"))
+	if changed.Code != http.StatusOK {
+		t.Fatalf("change contact with lang: expected 200, got %d: %s", changed.Code, changed.Body.String())
+	}
+	recorder.expectLocale(t, delivery.TemplateAuthVerificationCode, "ru")
 }
 
 func TestContactVerificationAndNoticeLocale(t *testing.T) {
@@ -130,9 +156,9 @@ func TestContactVerificationAndNoticeLocale(t *testing.T) {
 	verifyUser(t, login, device, registrationToken)
 	token := loginUser(t, login, password)
 
-	requested := doRequestWithHeaders("PUT", "/auth/contact_verifications", map[string]interface{}{
+	requested := doRequestWithHeaders("PUT", "/auth/contact_verifications"+langQuery("zh"), map[string]interface{}{
 		"contact_type": "email", "recipient": "locale-new@example.com", "device_uid": device, "current_password": password,
-	}, token, lang("zh-CN,zh;q=0.9"))
+	}, token, lang("en-US,en;q=0.9"))
 	if requested.Code != http.StatusOK {
 		t.Fatalf("request contact verification: expected 200, got %d: %s", requested.Code, requested.Body.String())
 	}
@@ -146,7 +172,8 @@ func TestContactVerificationAndNoticeLocale(t *testing.T) {
 	if _, err := testPool.ExecContext(context.Background(), `UPDATE contact_verifications SET code_hash=$1 WHERE id=$2`, string(hash), int64(verificationID)); err != nil {
 		t.Fatal(err)
 	}
-	confirmed := doRequestWithHeaders("POST", "/auth/contact_verifications/id/"+numberPath(verificationID), map[string]string{"code": "123456", "locale": "ru"}, token, lang("en"))
+	// The body's locale wins over both ?lang= and Accept-Language.
+	confirmed := doRequestWithHeaders("POST", "/auth/contact_verifications/id/"+numberPath(verificationID)+langQuery("zh"), map[string]string{"code": "123456", "locale": "ru"}, token, lang("en"))
 	if confirmed.Code != http.StatusOK {
 		t.Fatalf("confirm contact: expected 200, got %d: %s", confirmed.Code, confirmed.Body.String())
 	}
@@ -164,20 +191,55 @@ func TestPasswordResetCodeLocale(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		headers map[string]string
+		query   string
 		body    map[string]string
 		want    string
 	}{
 		{name: "header", headers: lang("ru-RU"), body: map[string]string{"login": login, "device_uid": device}, want: "ru"},
+		{name: "query lang beats header", headers: lang("en-US,en;q=0.9"), query: "ru", body: map[string]string{"login": login, "device_uid": device}, want: "ru"},
+		{name: "body beats query lang", headers: lang("en"), query: "ru", body: map[string]string{"login": login, "device_uid": device, "locale": "zh"}, want: "zh"},
+		{name: "invalid query lang falls back to header", headers: lang("en"), query: "1x", body: map[string]string{"login": login, "device_uid": device}, want: "en"},
 		{name: "body wins", headers: lang("ru"), body: map[string]string{"login": login, "device_uid": device, "locale": "zh"}, want: "zh"},
 		{name: "no language", body: map[string]string{"login": login, "device_uid": device}, want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder.events = nil
-			w := doRequestWithHeaders("POST", "/auth/password/reset-request", tc.body, "", tc.headers)
+			w := doRequestWithHeaders("POST", "/auth/password/reset-request"+langQuery(tc.query), tc.body, "", tc.headers)
 			if w.Code != http.StatusOK {
 				t.Fatalf("reset request: expected 200, got %d: %s", w.Code, w.Body.String())
 			}
 			recorder.expectLocale(t, delivery.TemplateAuthPasswordReset, tc.want)
 		})
 	}
+}
+
+// The webapp resends a registration code through PUT /auth/contact_verifications
+// with the registration token and its ?lang=.
+func TestRegistrationCodeResendLocale(t *testing.T) {
+	truncateTables(t)
+	recorder := recordDeliveryEvents(t)
+
+	const login = "locale-resend@example.com"
+	registration := doRequestWithHeaders("POST", "/auth/register"+langQuery("ru"), map[string]interface{}{
+		"login": login, "password": "Password1", "device_uid": "locale-resend",
+	}, "", lang("en-US,en;q=0.9"))
+	if registration.Code != http.StatusCreated {
+		t.Fatalf("register: expected 201, got %d: %s", registration.Code, registration.Body.String())
+	}
+	recorder.expectLocale(t, delivery.TemplateAuthVerificationCode, "ru")
+	registered := parseJSON(registration)
+	registrationToken, _ := registered["registration_token"].(string)
+	initialID, _ := registered["verification_id"].(float64)
+	if _, err := testPool.ExecContext(context.Background(), `UPDATE contact_verifications SET sent_ts=NOW() - INTERVAL '61 seconds' WHERE id=$1`, int64(initialID)); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder.events = nil
+	resent := doRequestWithHeaders("PUT", "/auth/contact_verifications"+langQuery("en"), map[string]interface{}{
+		"contact_type": "email", "recipient": login, "device_uid": "locale-resend", "allow_fallback": true,
+	}, registrationToken, lang("ru-RU,ru;q=0.9"))
+	if resent.Code != http.StatusOK {
+		t.Fatalf("resend: expected 200, got %d: %s", resent.Code, resent.Body.String())
+	}
+	recorder.expectLocale(t, delivery.TemplateAuthVerificationCode, "en")
 }

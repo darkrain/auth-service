@@ -69,7 +69,8 @@ type CodeDeliveryConfig struct {
 	Phone                   CodeDeliveryPhoneConfig `json:"Phone"`
 	PublishTestAccountCodes bool                    `json:"PublishTestAccountCodes"`
 	// Locales lists the languages a request may ask its code messages in
-	// ("en", "ru", ...). Empty accepts any language tag.
+	// ("en", "ru", ...) through the body's locale, the lang query parameter
+	// or Accept-Language. Empty accepts any language tag.
 	Locales []string `json:"Locales"`
 }
 
