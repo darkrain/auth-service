@@ -238,6 +238,8 @@ func localizedSecurityError(c *gin.Context, err error) string {
 func accountSecurityErrorField(err error, fallback string) string {
 	message := strings.ToLower(err.Error())
 	switch {
+	case service.PasswordPolicyRule(err) != "":
+		return "new_password"
 	case strings.Contains(message, "confirmation"):
 		return "confirmation"
 	case strings.Contains(message, "password must"):

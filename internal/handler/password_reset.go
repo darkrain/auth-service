@@ -9,7 +9,6 @@ import (
 	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
-	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -34,7 +33,8 @@ type resetConfirmBody struct {
 //	@Tags			password-reset
 //	@Accept			json
 //	@Produce		json
-//	@Param			Accept-Language	header	string	false	"Language of the code message when the body has no locale, e.g. ru"
+//	@Param			lang	query	string	false	"Language chosen in the client app, e.g. ru; used when the body has no locale, before Accept-Language"
+//	@Param			Accept-Language	header	string	false	"Language of the code message when neither the body locale nor lang is given, e.g. ru"
 //	@Param			request	body		resetRequestBody	true	"Login and device UID"
 //	@Success		200		{object}	messageResponse
 //	@Failure		400		{object}	errorResponse
@@ -66,7 +66,7 @@ func ResetRequest(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config,
 
 		// Always return 200 regardless of result (no user enumeration)
 		_ = service.RequestPasswordReset(c.Request.Context(), pool, conn, cfg, cacheClient, req.Login, req.DeviceUID, ip,
-			delivery.RequestLocale(req.Locale, c.GetHeader("Accept-Language"), cfg.CodeDelivery.Locales))
+			CodeLocale(c, cfg, req.Locale))
 
 		c.JSON(http.StatusOK, gin.H{"message": "If an account with that login exists, a reset code has been sent."})
 	}
@@ -113,8 +113,9 @@ func ResetConfirm(pool *sql.DB, cfg *config.Config, cacheClient *cache.Client) g
 				c.JSON(http.StatusBadRequest, errResp(CodeInvalidCode, "invalid reset code"))
 			case errors.Is(err, service.ErrTooManyCodeAttempts):
 				c.JSON(http.StatusTooManyRequests, errResp(CodeTooManyRequests, "too many attempts, request a new reset code"))
-			case errors.Is(err, service.ErrWeakPassword):
-				c.JSON(http.StatusBadRequest, errResp(CodeWeakPassword, strings.TrimPrefix(err.Error(), "validation error: ")))
+			case service.PasswordPolicyRule(err) != "":
+				response, _ := passwordPolicyError(err)
+				c.JSON(http.StatusBadRequest, response)
 			case errors.Is(err, service.ErrValidation):
 				c.JSON(http.StatusBadRequest, errResp(CodeInvalidRequest, err.Error()))
 			default:

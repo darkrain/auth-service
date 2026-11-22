@@ -68,6 +68,10 @@ func TestRegister_WeakPassword_TooShort(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for short password, got %d: %s", w.Code, w.Body.String())
 	}
+	body := parseJSON(w)
+	if body["code"] != "ERR_PASSWORD_TOO_SHORT" || body["error"] != "password must be at least 6 characters" {
+		t.Fatalf("short password must have a stable code and message: %s", w.Body.String())
+	}
 }
 
 func TestRegister_AllowsWeakPasswordAfterMinimumLength(t *testing.T) {

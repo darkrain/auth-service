@@ -3,7 +3,7 @@
   "Port": "8081",
   "PasswordSalt": "test_salt",
   "PasswordMinLength": 6,
-  "PasswordRequireDigits": true,
+  "PasswordRequireDigits": false,
   "TwoFactorEnabled": true,
   "TwoFactorIssuer": "Auth Service Test",
   "TwoFactorEncryptionKey": "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=",

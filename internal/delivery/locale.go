@@ -10,15 +10,19 @@ import (
 const maxAcceptLanguageEntries = 16
 
 // RequestLocale returns the language a code message is written in, as the
-// lower-case primary subtag of a BCP 47 tag ("ru" for "ru-RU"). An explicit
-// value (a request body's "locale") wins over acceptLanguage, the request's
-// Accept-Language header, whose languages are tried by their q-values. A value
-// that is not a language tag is ignored. When allowed is not empty, only its
-// languages are accepted. The result is "" when nothing matches: the event
-// then has no metadata.locale and message-delivery uses its default locale.
-func RequestLocale(explicit, acceptLanguage string, allowed []string) string {
-	if language := primaryLanguage(explicit); language != "" && isAllowedLocale(language, allowed) {
-		return language
+// lower-case primary subtag of a BCP 47 tag ("ru" for "ru-RU"). The sources are
+// tried in this order: explicit (a request body's "locale"), query (the
+// request's "lang" query parameter, the language chosen in the client app),
+// then acceptLanguage, the request's Accept-Language header, whose languages
+// are tried by their q-values. A value that is not a language tag is ignored.
+// When allowed is not empty, only its languages are accepted. The result is ""
+// when nothing matches: the event then has no metadata.locale and
+// message-delivery uses its default locale.
+func RequestLocale(explicit, query, acceptLanguage string, allowed []string) string {
+	for _, tag := range []string{explicit, query} {
+		if language := primaryLanguage(tag); language != "" && isAllowedLocale(language, allowed) {
+			return language
+		}
 	}
 	for _, tag := range acceptedLanguages(acceptLanguage) {
 		if language := primaryLanguage(tag); language != "" && isAllowedLocale(language, allowed) {

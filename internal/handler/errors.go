@@ -1,6 +1,9 @@
 package handler
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/darkrain/auth-service/internal/service"
+	"github.com/gin-gonic/gin"
+)
 
 // Error codes for API responses
 const (
@@ -37,4 +40,23 @@ const (
 // errResp returns a gin.H with error message and code
 func errResp(code, message string) gin.H {
 	return gin.H{"error": message, "code": code}
+}
+
+// passwordPolicyError is the response to a new password the password policy
+// refused (service.ValidatePassword), the same at registration and reset:
+// ERR_PASSWORD_TOO_SHORT, ERR_PASSWORD_TOO_LONG, or ERR_WEAK_PASSWORD for a
+// configured complexity rule. ok is false for any other error.
+func passwordPolicyError(err error) (response gin.H, ok bool) {
+	var code string
+	switch service.PasswordPolicyRule(err) {
+	case "":
+		return nil, false
+	case service.PasswordRuleTooShort:
+		code = CodePasswordTooShort
+	case service.PasswordRuleTooLong:
+		code = CodePasswordTooLong
+	default:
+		code = CodeWeakPassword
+	}
+	return errResp(code, err.Error()), true
 }

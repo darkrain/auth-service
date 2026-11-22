@@ -65,17 +65,35 @@ cp auth-service.example.json auth-service.json
 email uses its default provider; a phone falls through `telegram`, `whatsapp`,
 then `sms` unless the caller explicitly selects a permitted provider.
 
+One password policy applies wherever a password is set: registration, password
+change and password reset, so a password is accepted or refused alike in all
+three. A password is trimmed like at sign-in and must have at least
+`PasswordMinLength` characters (counted as characters, not bytes) and at most
+128. `PasswordRequireDigits` and `PasswordRequireSpecial` additionally require
+a digit and a character that is neither a letter nor a digit; they are off by
+default and production keeps them `false` (only the minimum length is
+enforced; clients may show a strength hint). A refused password gets `400` with
+`ERR_PASSWORD_TOO_SHORT`, `ERR_PASSWORD_TOO_LONG` or, for a complexity flag,
+`ERR_WEAK_PASSWORD` from `/auth/register` and `/auth/password/reset-confirm`,
+and a `new_password` field error from the password change. Stored passwords are
+not re-checked: an account whose password is shorter than the current minimum
+still signs in.
+
 Code messages (registration, registration contact change, contact
 verification, password reset) and the contact-change notice are written in the
 requester's language. auth-service puts it into the delivery event as
 `metadata.locale`, which message-delivery uses to pick the template language.
-The language is an optional `locale` field of the request body (`"ru"`), else
-the most preferred language of the `Accept-Language` header (q-values are
-honoured, `ru-RU` becomes `ru`). Only the primary language subtag is sent;
-values that are not language tags are ignored. `CodeDelivery.Locales`
-(`["en", "ru", "zh"]`) optionally limits the accepted languages; empty accepts
-any. Without a language the event has no `metadata.locale` and message-delivery
-uses its default locale.
+The language is taken, in this order, from an optional `locale` field of the
+request body (`"ru"`), the `lang` query parameter (`?lang=ru`, the language the
+user chose in the client app), then the most preferred language of the
+`Accept-Language` header (q-values are honoured, `ru-RU` becomes `ru`). A
+browser sends `Accept-Language` on its own, so an explicit `locale` or `lang`
+always wins over it. Only the primary language subtag is sent; a `locale` or
+`lang` that is not a language tag, or not an accepted language, is ignored and
+the next source decides. `CodeDelivery.Locales` (`["en", "ru", "zh"]`)
+optionally limits the accepted languages; empty accepts any. Without a language
+the event has no `metadata.locale` and message-delivery uses its default
+locale.
 
 To enable TOTP two-factor authentication, set `TwoFactorEnabled` and supply a
 stable base64-encoded 32-byte encryption key. The key encrypts TOTP secrets at

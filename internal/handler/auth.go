@@ -10,7 +10,6 @@ import (
 	"github.com/darkrain/auth-service/internal/broker"
 	"github.com/darkrain/auth-service/internal/cache"
 	"github.com/darkrain/auth-service/internal/config"
-	"github.com/darkrain/auth-service/internal/delivery"
 	"github.com/darkrain/auth-service/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -40,7 +39,7 @@ type registerRequest struct {
 	Provider      string `json:"provider,omitempty" example:"telegram"`
 	AllowFallback bool   `json:"allow_fallback"`
 	// Locale is the language of the verification code message; without it
-	// the Accept-Language header decides.
+	// the lang query parameter, then the Accept-Language header decides.
 	Locale string `json:"locale,omitempty" example:"ru"`
 }
 
@@ -220,11 +219,12 @@ func Me() gin.HandlerFunc {
 // Register handles POST /auth/register
 //
 //	@Summary		Register a new user
-//	@Description	Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls. The verification code message is written in the body's locale, else in the language of Accept-Language.
+//	@Description	Creates a new user account. Login can be an email address or a phone number. Returns a short-lived registration_token to authenticate verification calls. The verification code message is written in the body's locale, else in the lang query parameter, else in the language of Accept-Language.
 //	@Tags			auth
 //	@Accept			json
 //	@Produce		json
-//	@Param			Accept-Language	header	string	false	"Language of the code message, e.g. ru"
+//	@Param			lang	query	string	false	"Language chosen in the client app, e.g. ru; used when the body has no locale, before Accept-Language"
+//	@Param			Accept-Language	header	string	false	"Language of the code message when neither the body locale nor lang is given, e.g. ru"
 //	@Param			request	body		registerRequest	true	"Registration data"
 //	@Success		201		{object}	registerResponse
 //	@Failure		400		{object}	errorResponse
@@ -250,7 +250,7 @@ func Register(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config) gin
 		result, err := service.Register(c.Request.Context(), pool, conn, cfg, service.RegisterRequest{
 			Login: req.Login, Password: req.Password, Role: req.Role, DeviceUID: req.DeviceUID,
 			Provider: req.Provider, AllowFallback: req.AllowFallback,
-			Locale: delivery.RequestLocale(req.Locale, c.GetHeader("Accept-Language"), cfg.CodeDelivery.Locales),
+			Locale: CodeLocale(c, cfg, req.Locale),
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidEmail) {
@@ -265,6 +265,10 @@ func Register(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config) gin
 			if errors.Is(err, service.ErrForbidden) {
 				msg := strings.TrimPrefix(err.Error(), "forbidden: ")
 				c.JSON(http.StatusForbidden, errResp(CodeRoleReserved, msg))
+				return
+			}
+			if response, ok := passwordPolicyError(err); ok {
+				c.JSON(http.StatusBadRequest, response)
 				return
 			}
 			if errors.Is(err, service.ErrValidation) {
