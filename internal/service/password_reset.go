@@ -229,8 +229,8 @@ func ConfirmPasswordReset(
 	}
 
 	// Validate new password
-	if err := validatePassword(newPassword, cfg); err != nil {
-		return fmt.Errorf("%w: %s", ErrWeakPassword, err.Error())
+	if err := ValidatePassword(newPassword, cfg); err != nil {
+		return err
 	}
 
 	// Hash new password

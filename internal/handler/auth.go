@@ -267,6 +267,10 @@ func Register(pool *sql.DB, conn broker.ChannelProvider, cfg *config.Config) gin
 				c.JSON(http.StatusForbidden, errResp(CodeRoleReserved, msg))
 				return
 			}
+			if response, ok := passwordPolicyError(err); ok {
+				c.JSON(http.StatusBadRequest, response)
+				return
+			}
 			if errors.Is(err, service.ErrValidation) {
 				msg := err.Error()
 				if strings.Contains(msg, "invalid role") {

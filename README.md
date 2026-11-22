@@ -65,6 +65,20 @@ cp auth-service.example.json auth-service.json
 email uses its default provider; a phone falls through `telegram`, `whatsapp`,
 then `sms` unless the caller explicitly selects a permitted provider.
 
+One password policy applies wherever a password is set: registration, password
+change and password reset, so a password is accepted or refused alike in all
+three. A password is trimmed like at sign-in and must have at least
+`PasswordMinLength` characters (counted as characters, not bytes) and at most
+128. `PasswordRequireDigits` and `PasswordRequireSpecial` additionally require
+a digit and a character that is neither a letter nor a digit; they are off by
+default and production keeps them `false` (only the minimum length is
+enforced; clients may show a strength hint). A refused password gets `400` with
+`ERR_PASSWORD_TOO_SHORT`, `ERR_PASSWORD_TOO_LONG` or, for a complexity flag,
+`ERR_WEAK_PASSWORD` from `/auth/register` and `/auth/password/reset-confirm`,
+and a `new_password` field error from the password change. Stored passwords are
+not re-checked: an account whose password is shorter than the current minimum
+still signs in.
+
 Code messages (registration, registration contact change, contact
 verification, password reset) and the contact-change notice are written in the
 requester's language. auth-service puts it into the delivery event as

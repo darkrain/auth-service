@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 
 	"database/sql"
 	"github.com/darkrain/auth-service/internal/broker"
@@ -249,9 +248,8 @@ func Register(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cf
 		}
 	}
 
-	// Registration enforces only the configured minimum length. Complexity is a
-	// client-side strength warning, not a reason to reject a usable account.
-	if err := validateRegistrationPassword(req.Password, cfg); err != nil {
+	// The same policy as password change and reset (ValidatePassword).
+	if err := ValidatePassword(req.Password, cfg); err != nil {
 		return nil, err
 	}
 
@@ -284,11 +282,6 @@ func Register(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cf
 		if exists {
 			return nil, ErrAlreadyExists
 		}
-	}
-
-	// 5. Validate password max length
-	if err := validator.ValidatePasswordLength(req.Password); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 
 	// 5. Hash password: bcrypt(salt + password)
@@ -366,46 +359,4 @@ func Register(ctx context.Context, pool *sql.DB, conn broker.ChannelProvider, cf
 		VerificationID:    verificationID,
 		ResendAfterSec:    cfg.RateLimit.Code.ResendCooldownSec,
 	}, nil
-}
-
-func validateRegistrationPassword(password string, cfg *config.Config) error {
-	if cfg.PasswordMinLength > 0 && len(password) < cfg.PasswordMinLength {
-		return fmt.Errorf("%w: password must be at least %d characters", ErrValidation, cfg.PasswordMinLength)
-	}
-	return nil
-}
-
-// validatePassword checks password complexity against config rules.
-func validatePassword(password string, cfg *config.Config) error {
-	if cfg.PasswordMinLength > 0 && len(password) < cfg.PasswordMinLength {
-		return fmt.Errorf("%w: password must be at least %d characters", ErrValidation, cfg.PasswordMinLength)
-	}
-
-	if cfg.PasswordRequireDigits {
-		hasDigit := false
-		for _, r := range password {
-			if unicode.IsDigit(r) {
-				hasDigit = true
-				break
-			}
-		}
-		if !hasDigit {
-			return fmt.Errorf("%w: password must contain at least one digit", ErrValidation)
-		}
-	}
-
-	if cfg.PasswordRequireSpecial {
-		hasSpecial := false
-		for _, r := range password {
-			if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-				hasSpecial = true
-				break
-			}
-		}
-		if !hasSpecial {
-			return fmt.Errorf("%w: password must contain at least one special character", ErrValidation)
-		}
-	}
-
-	return nil
 }
